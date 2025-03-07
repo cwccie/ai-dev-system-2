@@ -32,7 +32,7 @@ The system consists of the following main components:
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/yourusername/ai-dev-orchestration.git
+   git clone https://github.com/yourusername/ai-dev-system-2
    cd ai-dev-orchestration
    ```
 
