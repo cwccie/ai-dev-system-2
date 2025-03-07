@@ -694,7 +694,7 @@ install_ollama() {
     fi
     
     update_progress
-} to initialize
+
         print_message "Waiting for Ollama service to start..."
         local max_attempts=30
         local attempt=0
@@ -722,7 +722,7 @@ install_ollama() {
     fi
     
     update_progress
-} service to start..."
+
     sleep 5
     
     # Verify Ollama is running
