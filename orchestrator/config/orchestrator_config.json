@@ -1,0 +1,41 @@
+{
+  "model": {
+    "provider": "claude",
+    "name": "claude-3-7-sonnet-20250219",
+    "temperature": 0.7,
+    "max_tokens": 4000
+  },
+  "project": {
+    "exclude_dirs": [
+      "node_modules",
+      "venv",
+      ".git",
+      "__pycache__",
+      "dist",
+      "build"
+    ],
+    "exclude_files": [
+      "*.pyc",
+      "*.log",
+      "*.tmp",
+      "*.cache"
+    ],
+    "max_files_to_analyze": 50,
+    "max_file_size_kb": 500
+  },
+  "generation": {
+    "iterations": 2,
+    "parallel_scripts": 1,
+    "add_comments": true,
+    "include_tests": false
+  },
+  "review": {
+    "enabled": true,
+    "criteria": {
+      "functionality": 0.4,
+      "code_quality": 0.3,
+      "documentation": 0.3
+    },
+    "min_accepted_score": 0.7
+  }
+}

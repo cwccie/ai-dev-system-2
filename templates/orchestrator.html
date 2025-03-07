@@ -1,0 +1,192 @@
+                </div>
+                
+                <div class="provider-section">
+                    <h3>AI Model Selection</h3>
+                    <div class="form-group">
+                        <label for="model-provider">Select AI Model:</label>
+                        <select id="model-provider" name="model_provider" class="model-select">
+                            {% for provider_id, provider_name in model_providers.items() %}
+                            <option value="{{ provider_id }}" {% if config.model.provider == provider_id %}selected{% endif %}>{{ provider_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <!-- Claude Settings -->
+                    <div class="model-settings claude-settings">
+                        <h4>Claude Settings</h4>
+                        <div class="form-group">
+                            <label for="claude-model">Model:</label>
+                            <select id="claude-model" name="claude_model">
+                                <option value="claude-3-7-sonnet-20250219" selected>Claude 3.7 Sonnet</option>
+                                <option value="claude-3-5-sonnet-20240620">Claude 3.5 Sonnet</option>
+                                <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                                <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
+                                <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="claude-temperature">Temperature:</label>
+                            <input type="range" id="claude-temperature" name="claude_temperature" min="0" max="1" step="0.1" value="{{ config.model.temperature|default(0.7) }}">
+                            <span id="claude-temperature-value">{{ config.model.temperature|default(0.7) }}</span>
+                        </div>
+                    </div>
+                    
+                    <!-- OpenAI Settings -->
+                    <div class="model-settings openai-settings">
+                        <h4>OpenAI Settings</h4>
+                        <div class="form-group">
+                            <label for="openai-model">Model:</label>
+                            <select id="openai-model" name="openai_model">
+                                <option value="gpt-4o" selected>GPT-4o</option>
+                                <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                <option value="gpt-4">GPT-4</option>
+                                <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="openai-temperature">Temperature:</label>
+                            <input type="range" id="openai-temperature" name="openai_temperature" min="0" max="1" step="0.1" value="{{ config.model.temperature|default(0.7) }}">
+                            <span id="openai-temperature-value">{{ config.model.temperature|default(0.7) }}</span>
+                        </div>
+                    </div>
+                    
+                    <!-- DeepSeek Settings -->
+                    <div class="model-settings deepseek-settings">
+                        <h4>DeepSeek Settings</h4>
+                        <div class="form-group">
+                            <label for="deepseek-model">Model:</label>
+                            <select id="deepseek-model" name="deepseek_model">
+                                <option value="deepseek-coder" selected>DeepSeek Coder</option>
+                                <option value="deepseek-chat">DeepSeek Chat</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="deepseek-temperature">Temperature:</label>
+                            <input type="range" id="deepseek-temperature" name="deepseek_temperature" min="0" max="1" step="0.1" value="{{ config.model.temperature|default(0.7) }}">
+                            <span id="deepseek-temperature-value">{{ config.model.temperature|default(0.7) }}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <h3>Generation Settings</h3>
+                    <div class="form-group">
+                        <label for="iterations">Iterations:</label>
+                        <input type="number" id="iterations" name="iterations" min="1" max="5" value="{{ config.generation.iterations|default(2) }}">
+                        <small>Number of iterations to run for each script</small>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" name="add_comments" {% if config.generation.add_comments|default(true) %}checked{% endif %}>
+                            Add detailed comments
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" name="include_tests" {% if config.generation.include_tests|default(false) %}checked{% endif %}>
+                            Include tests
+                        </label>
+                    </div>
+                </div>
+                
+                <button type="submit">Generate Scripts</button>
+            </form>
+            
+            <div id="result-container" class="result-container"></div>
+        </div>
+        
+        <div class="card">
+            <h3>How It Works</h3>
+            <p>The orchestrator follows these steps:</p>
+            <ol>
+                <li>Analyzes your project directory to understand the structure and dependencies</li>
+                <li>Processes your script definitions to determine generation order</li>
+                <li>Generates each script using the selected AI model</li>
+                <li>Reviews the generated scripts for quality and correctness</li>
+                <li>Saves successful scripts to the specified paths</li>
+            </ol>
+            
+            <h3>Script Definition Format</h3>
+            <p>Each script definition should include:</p>
+            <ul>
+                <li><strong>name</strong>: Name of the script</li>
+                <li><strong>path</strong>: Path where the script should be saved</li>
+                <li><strong>description</strong>: Detailed description of the script's purpose</li>
+                <li><strong>requirements</strong>: List of specific requirements</li>
+                <li><strong>related_files</strong> (optional): List of related files to include in context</li>
+                <li><strong>dependencies</strong> (optional): List of other scripts this script depends on</li>
+            </ul>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="container">
+            <p>AI Development Orchestration System - <a href="{{ url_for('index') }}">Back to Home</a></p>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orchestrator - AI Development Orchestration System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>AI Development Orchestration System</h1>
+            <p>Generate multiple scripts with project context awareness</p>
+            <div class="user-info">
+                Logged in as <strong>{{ current_user.username }}</strong> | 
+                <a href="{{ url_for('logout') }}" class="logout-link">Logout</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <h2>Orchestrator</h2>
+            <p>The orchestrator analyzes your project structure and generates multiple scripts with dependency awareness.</p>
+            
+            <form id="orchestrator-form" action="{{ url_for('run_orchestrator') }}" method="post">
+                <div class="form-group">
+                    <label for="project-dir">Project Directory:</label>
+                    <input type="text" id="project-dir" name="project_dir" placeholder="Path to your project directory" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="script-definitions">Script Definitions (JSON):</label>
+                    <textarea id="script-definitions" name="script_definitions" rows="10" placeholder='[
+  {
+    "name": "data_processor.py",
+    "path": "src/processing/data_processor.py",
+    "description": "Process input data and prepare it for analysis",
+    "requirements": [
+      "Handle CSV and JSON input formats",
+      "Clean and normalize data",
+      "Handle missing values"
+    ],
+    "related_files": []
+  },
+  {
+    "name": "data_analyzer.py",
+    "path": "src/analysis/data_analyzer.py",
+    "description": "Analyze processed data and generate reports",
+    "requirements": [
+      "Calculate statistics",
+      "Generate visualizations",
+      "Export results to CSV"
+    ],
+    "dependencies": [
+      "src/processing/data_processor.py"
+    ]
+  }
+]' required>

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Development Orchestration System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>AI Development Orchestration System</h1>
+            <div class="user-info">
+                Logged in as <strong>{{ current_user.username }}</strong> | 
+                <a href="{{ url_for('logout') }}" class="logout-link">Logout</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <h2>Welcome to the AI Development Orchestration System</h2>
+            <p>This system provides tools for generating code using various AI models:</p>
+            
+            <div class="provider-section">
+                <h3>Available Components</h3>
+                <div class="component-cards">
+                    <div class="card">
+                        <h4>Orchestrator</h4>
+                        <p>Generate multiple scripts with project context awareness</p>
+                        <a href="{{ url_for('orchestrator') }}" class="btn">Go to Orchestrator</a>
+                    </div>
+                    
+                    <div class="card">
+                        <h4>Script Agent</h4>
+                        <p>Generate individual scripts with simple specifications</p>
+                        <a href="{{ url_for('script_agent') }}" class="btn">Go to Script Agent</a>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="provider-section">
+                <h3>API Key Management</h3>
+                <p>Configure API keys for the AI model providers:</p>
+                
+                <div class="api-key-cards">
+                    <div class="card">
+                        <h4>Claude (Anthropic)</h4>
+                        <form class="api-key-form">
+                            <input type="hidden" name="provider" value="claude">
+                            <div class="form-group">
+                                <label for="claude-api-key">API Key:</label>
+                                <input type="password" id="claude-api-key" name="api_key" placeholder="Enter Anthropic API key" {% if api_keys.claude %}value="********"{% endif %}>
+                            </div>
+                            <button type="submit">Save Key</button>
+                            <div class="status-message"></div>
+                        </form>
+                    </div>
+                    
+                    <div class="card">
+                        <h4>GPT (OpenAI)</h4>
+                        <form class="api-key-form">
+                            <input type="hidden" name="provider" value="openai">
+                            <div class="form-group">
+                                <label for="openai-api-key">API Key:</label>
+                                <input type="password" id="openai-api-key" name="api_key" placeholder="Enter OpenAI API key" {% if api_keys.openai %}value="********"{% endif %}>
+                            </div>
+                            <button type="submit">Save Key</button>
+                            <div class="status-message"></div>
+                        </form>
+                    </div>
+                    
+                    <div class="card">
+                        <h4>DeepSeek</h4>
+                        <form class="api-key-form">
+                            <input type="hidden" name="provider" value="deepseek">
+                            <div class="form-group">
+                                <label for="deepseek-api-key">API Key:</label>
+                                <input type="password" id="deepseek-api-key" name="api_key" placeholder="Enter DeepSeek API key" {% if api_keys.deepseek %}value="********"{% endif %}>
+                            </div>
+                            <button type="submit">Save Key</button>
+                            <div class="status-message"></div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="container">
+            <p>AI Development Orchestration System - Powered by multiple AI models</p>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
