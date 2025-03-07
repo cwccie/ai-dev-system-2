@@ -1,41 +1,106 @@
 {
   "model": {
-    "provider": "claude",
-    "name": "claude-3-7-sonnet-20250219",
+    "default_provider": "claude",
+    "default_model": "claude-3-7-sonnet-20250219",
     "temperature": 0.7,
-    "max_tokens": 4000
+    "max_tokens": 8000,
+    "system_prompt": "You are an expert software developer tasked with generating high-quality code. Write clean, efficient, well-documented code following best practices for the language/framework being used."
   },
   "project": {
-    "exclude_dirs": [
-      "node_modules",
-      "venv",
-      ".git",
-      "__pycache__",
-      "dist",
-      "build"
-    ],
-    "exclude_files": [
-      "*.pyc",
-      "*.log",
-      "*.tmp",
-      "*.cache"
-    ],
+    "exclude_dirs": ["venv", "node_modules", ".git", "__pycache__", "build", "dist"],
+    "exclude_files": ["*.pyc", "*.pyo", "*.pyd", "*.so", "*.dylib", "*.dll", "*.exe", "*.log", "*.tmp"],
     "max_files_to_analyze": 50,
     "max_file_size_kb": 500
   },
   "generation": {
     "iterations": 2,
-    "parallel_scripts": 1,
     "add_comments": true,
-    "include_tests": false
+    "add_tests": false,
+    "strict_validation": true
   },
   "review": {
     "enabled": true,
+    "min_accepted_score": 0.7,
     "criteria": {
-      "functionality": 0.4,
+      "functionality": 0.5,
       "code_quality": 0.3,
-      "documentation": 0.3
+      "documentation": 0.2
+    }
+  },
+  "output": {
+    "save_history": true,
+    "history_dir": "generation_history",
+    "save_reviews": true
+  },
+  "decomposition": {
+    "enabled": true,
+    "complexity_threshold": 7.0,
+    "max_components": 5,
+    "min_components": 2,
+    "allow_parallel": true,
+    "reassemble": true,
+    "templates": {
+      "python": {
+        "main": "# Main component template\nimport os\nimport sys\n\ndef main():\n    pass\n\nif __name__ == \"__main__\":\n    main()",
+        "class": "# Class component template\nclass $ClassName:\n    def __init__(self):\n        pass",
+        "utility": "# Utility functions template\ndef utility_function():\n    pass"
+      },
+      "javascript": {
+        "main": "// Main component template\nfunction main() {\n  // Implementation here\n}\n\nmodule.exports = { main };",
+        "class": "// Class component template\nclass $ClassName {\n  constructor() {\n    // Initialize here\n  }\n}\n\nmodule.exports = $ClassName;",
+        "utility": "// Utility functions template\nfunction utilityFunction() {\n  // Implementation here\n}\n\nmodule.exports = { utilityFunction };"
+      }
+    }
+  },
+  "parallelism": {
+    "enabled": true,
+    "max_workers": 3,
+    "prioritize_criticals": true,
+    "dependency_aware": true
+  },
+  "rate_limits": {
+    "claude": {
+      "requests_per_minute": 10,
+      "concurrent_requests": 5,
+      "tokens_per_minute": 100000
     },
-    "min_accepted_score": 0.7
+    "openai": {
+      "requests_per_minute": 15,
+      "concurrent_requests": 8,
+      "tokens_per_minute": 150000
+    },
+    "deepseek": {
+      "requests_per_minute": 5,
+      "concurrent_requests": 3,
+      "tokens_per_minute": 60000
+    }
+  },
+  "cost_optimization": {
+    "enabled": true,
+    "budget_cap_per_script": 0.5,
+    "prefer_cost_efficient": true,
+    "downgrade_for_simple_tasks": true,
+    "use_pricing_config": true
+  },
+  "model_recommendation": {
+    "enabled": true,
+    "consider_complexity": true,
+    "consider_task_type": true,
+    "consider_performance_history": true,
+    "allow_override": true
+  },
+  "failure_handling": {
+    "max_retries": 3,
+    "retry_delay_seconds": 5,
+    "auto_decompose_on_failure": true,
+    "auto_change_model_on_failure": true,
+    "track_failure_patterns": true
+  },
+  "metrics": {
+    "track_generation_time": true,
+    "track_token_usage": true,
+    "track_model_performance": true,
+    "save_metrics": true,
+    "metrics_file": "generation_metrics.json"
   }
 }

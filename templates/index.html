@@ -5,83 +5,136 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Development Orchestration System</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
     <header>
         <div class="container">
-            <h1>AI Development Orchestration System</h1>
-            <div class="user-info">
-                Logged in as <strong>{{ current_user.username }}</strong> | 
-                <a href="{{ url_for('logout') }}" class="logout-link">Logout</a>
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <h1>AI Development Orchestration System</h1>
+                </div>
+                <div class="col-md-6 text-end">
+                    <span class="user-info">
+                        Logged in as: <strong>{{ current_user.username }}</strong>
+                        <a href="{{ url_for('logout') }}" class="logout-link">Logout</a>
+                    </span>
+                </div>
             </div>
         </div>
     </header>
 
     <div class="container">
-        <div class="card">
-            <h2>Welcome to the AI Development Orchestration System</h2>
-            <p>This system provides tools for generating code using various AI models:</p>
-            
-            <div class="provider-section">
-                <h3>Available Components</h3>
-                <div class="component-cards">
+        <!-- Welcome Section -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h2>Welcome to the AI Dev Orchestration System</h2>
+                <p>This advanced system leverages multiple AI models to generate code for your projects. Choose from Claude (Anthropic), GPT (OpenAI), or DeepSeek to create scripts based on your specifications.</p>
+                <p>New features include script decomposition, cost optimization, parallel generation, and intelligent model selection.</p>
+            </div>
+        </div>
+        
+        <!-- API Keys Configuration -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3>API Key Configuration</h3>
+            </div>
+            <div class="card-body">
+                <p>To use the system, you need to configure at least one AI provider API key:</p>
+                
+                <div class="api-key-cards">
+                    {% for provider, display_name in model_providers.items() %}
                     <div class="card">
-                        <h4>Orchestrator</h4>
-                        <p>Generate multiple scripts with project context awareness</p>
-                        <a href="{{ url_for('orchestrator') }}" class="btn">Go to Orchestrator</a>
+                        <div class="card-header">
+                            <h4>{{ display_name }}</h4>
+                        </div>
+                        <div class="card-body">
+                            <form class="api-key-form">
+                                <input type="hidden" name="provider" value="{{ provider }}">
+                                
+                                <div class="form-group">
+                                    <label for="{{ provider }}_api_key">API Key</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="{{ provider }}_api_key" name="api_key" 
+                                               placeholder="Enter {{ display_name }} API key" 
+                                               {% if api_keys[provider] %}value="•••••••••••••••••••••"{% endif %}>
+                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('{{ provider }}_api_key')">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-eye" viewBox="0 0 16 16">
+                                                <path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.133 13.133 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.133 13.133 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.755C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.134 13.134 0 0 1 1.172 8z"/>
+                                                <path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <button type="submit" class="btn btn-primary mt-2">Save API Key</button>
+                                
+                                <div class="status-message mt-2"></div>
+                                
+                                <div class="api-status mt-3">
+                                    <span class="badge {{ 'bg-success' if api_keys[provider] else 'bg-warning text-dark' }}">
+                                        {{ 'Configured' if api_keys[provider] else 'Not Configured' }}
+                                    </span>
+                                </div>
+                            </form>
+                        </div>
                     </div>
-                    
-                    <div class="card">
-                        <h4>Script Agent</h4>
-                        <p>Generate individual scripts with simple specifications</p>
-                        <a href="{{ url_for('script_agent') }}" class="btn">Go to Script Agent</a>
-                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Components -->
+        <h3 class="mb-3">Available Components</h3>
+        
+        <div class="component-cards">
+            <!-- Orchestrator Component -->
+            <div class="card">
+                <div class="card-body">
+                    <h4>Script Orchestrator</h4>
+                    <p>Generate multiple interdependent scripts with project context awareness. The orchestrator analyzes your project structure and creates scripts that work together.</p>
+                    <ul>
+                        <li>Analyze project structure for context</li>
+                        <li>Generate multiple interdependent scripts</li>
+                        <li>Automatically handle dependencies</li>
+                        <li>Decompose complex scripts</li>
+                        <li>Parallelize generation for speed</li>
+                    </ul>
+                    <a href="{{ url_for('orchestrator') }}" class="btn btn-primary">Open Orchestrator</a>
                 </div>
             </div>
             
-            <div class="provider-section">
-                <h3>API Key Management</h3>
-                <p>Configure API keys for the AI model providers:</p>
-                
-                <div class="api-key-cards">
-                    <div class="card">
-                        <h4>Claude (Anthropic)</h4>
-                        <form class="api-key-form">
-                            <input type="hidden" name="provider" value="claude">
-                            <div class="form-group">
-                                <label for="claude-api-key">API Key:</label>
-                                <input type="password" id="claude-api-key" name="api_key" placeholder="Enter Anthropic API key" {% if api_keys.claude %}value="********"{% endif %}>
-                            </div>
-                            <button type="submit">Save Key</button>
-                            <div class="status-message"></div>
-                        </form>
-                    </div>
-                    
-                    <div class="card">
-                        <h4>GPT (OpenAI)</h4>
-                        <form class="api-key-form">
-                            <input type="hidden" name="provider" value="openai">
-                            <div class="form-group">
-                                <label for="openai-api-key">API Key:</label>
-                                <input type="password" id="openai-api-key" name="api_key" placeholder="Enter OpenAI API key" {% if api_keys.openai %}value="********"{% endif %}>
-                            </div>
-                            <button type="submit">Save Key</button>
-                            <div class="status-message"></div>
-                        </form>
-                    </div>
-                    
-                    <div class="card">
-                        <h4>DeepSeek</h4>
-                        <form class="api-key-form">
-                            <input type="hidden" name="provider" value="deepseek">
-                            <div class="form-group">
-                                <label for="deepseek-api-key">API Key:</label>
-                                <input type="password" id="deepseek-api-key" name="api_key" placeholder="Enter DeepSeek API key" {% if api_keys.deepseek %}value="********"{% endif %}>
-                            </div>
-                            <button type="submit">Save Key</button>
-                            <div class="status-message"></div>
-                        </form>
-                    </div>
+            <!-- Script Agent Component -->
+            <div class="card">
+                <div class="card-body">
+                    <h4>Script Agent</h4>
+                    <p>Generate individual scripts with simple specifications. The script agent creates standalone scripts based on your requirements.</p>
+                    <ul>
+                        <li>Quick script generation</li>
+                        <li>Intelligent model recommendation</li>
+                        <li>Cost estimation</li>
+                        <li>Script decomposition</li>
+                        <li>Component-based generation</li>
+                    </ul>
+                    <a href="{{ url_for('script_agent') }}" class="btn btn-primary">Open Script Agent</a>
+                </div>
+            </div>
+            
+            <!-- Dashboard Component -->
+            <div class="card">
+                <div class="card-body">
+                    <h4>Monitoring Dashboard</h4>
+                    <p>Monitor script generation tasks, visualize dependencies, track costs, and analyze model performance.</p>
+                    <ul>
+                        <li>Real-time task monitoring</li>
+                        <li>Cost tracking and visualization</li>
+                        <li>Dependency graph visualization</li>
+                        <li>Model performance analytics</li>
+                        <li>Task prioritization</li>
+                    </ul>
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Open Dashboard</a>
                 </div>
             </div>
         </div>
@@ -89,10 +142,21 @@
 
     <footer class="footer">
         <div class="container">
-            <p>AI Development Orchestration System - Powered by multiple AI models</p>
+            <p>AI Development Orchestration System &copy; 2025</p>
         </div>
     </footer>
 
+    <!-- JavaScript for API key forms -->
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script>
+        function togglePasswordVisibility(elementId) {
+            const input = document.getElementById(elementId);
+            if (input.type === "password") {
+                input.type = "text";
+            } else {
+                input.type = "password";
+            }
+        }
+    </script>
 </body>
 </html>

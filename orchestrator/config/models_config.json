@@ -1,0 +1,189 @@
+{
+  "providers": {
+    "claude": {
+      "models": {
+        "claude-3-opus-20240229": {
+          "strengths": ["complex reasoning", "creative writing", "long context", "instruction following"],
+          "weaknesses": ["mathematical calculations", "very specific formatting"],
+          "complexity_range": [7, 10],
+          "context_length": 200000,
+          "quality_factor": 0.9,
+          "speed_factor": 0.7,
+          "cost_factor": 0.5
+        },
+        "claude-3-7-sonnet-20250219": {
+          "strengths": ["balanced performance", "code generation", "long context", "reasoning"],
+          "weaknesses": ["complex mathematical proofs"],
+          "complexity_range": [4, 9],
+          "context_length": 200000,
+          "quality_factor": 0.85,
+          "speed_factor": 0.8,
+          "cost_factor": 0.7
+        },
+        "claude-3-5-sonnet-20240620": {
+          "strengths": ["balanced performance", "code generation", "long context"],
+          "weaknesses": ["complex mathematical proofs"],
+          "complexity_range": [4, 8],
+          "context_length": 200000,
+          "quality_factor": 0.83,
+          "speed_factor": 0.82,
+          "cost_factor": 0.75
+        },
+        "claude-3-haiku-20240307": {
+          "strengths": ["speed", "simple tasks", "basic code", "shorter outputs"],
+          "weaknesses": ["very complex tasks", "research-level problems"],
+          "complexity_range": [1, 7],
+          "context_length": 200000,
+          "quality_factor": 0.7,
+          "speed_factor": 0.95,
+          "cost_factor": 0.9
+        },
+        "claude-3-5-haiku-20240620": {
+          "strengths": ["speed", "simple tasks", "basic code", "shorter outputs"],
+          "weaknesses": ["very complex tasks", "research-level problems"],
+          "complexity_range": [1, 7],
+          "context_length": 200000,
+          "quality_factor": 0.72,
+          "speed_factor": 0.95,
+          "cost_factor": 0.9
+        }
+      }
+    },
+    "openai": {
+      "models": {
+        "gpt-4o": {
+          "strengths": ["balanced performance", "code generation", "instruction following", "math"],
+          "weaknesses": [],
+          "complexity_range": [3, 9],
+          "context_length": 128000,
+          "quality_factor": 0.88,
+          "speed_factor": 0.82,
+          "cost_factor": 0.75
+        },
+        "gpt-4-turbo": {
+          "strengths": ["complex reasoning", "code generation", "math"],
+          "weaknesses": ["sometimes verbose"],
+          "complexity_range": [5, 9],
+          "context_length": 128000,
+          "quality_factor": 0.85,
+          "speed_factor": 0.75,
+          "cost_factor": 0.6
+        },
+        "gpt-3.5-turbo": {
+          "strengths": ["speed", "simple code", "summarization"],
+          "weaknesses": ["complex reasoning", "nuanced tasks"],
+          "complexity_range": [1, 6],
+          "context_length": 16384,
+          "quality_factor": 0.65,
+          "speed_factor": 0.9,
+          "cost_factor": 0.95
+        }
+      }
+    },
+    "deepseek": {
+      "models": {
+        "deepseek-coder": {
+          "strengths": ["code generation", "algorithms", "technical documentation"],
+          "weaknesses": ["creative writing", "conversational tasks"],
+          "complexity_range": [3, 8],
+          "context_length": 32768,
+          "quality_factor": 0.8,
+          "speed_factor": 0.8,
+          "cost_factor": 0.8
+        }
+      }
+    }
+  },
+  "task_categories": {
+    "code_generation": {
+      "keywords": ["code", "script", "function", "class", "algorithm", "implement"],
+      "preferred_models": ["deepseek-coder", "gpt-4o", "claude-3-7-sonnet-20250219"]
+    },
+    "data_processing": {
+      "keywords": ["data", "csv", "json", "parse", "transform", "clean", "format"],
+      "preferred_models": ["claude-3-7-sonnet-20250219", "gpt-4o", "deepseek-coder"]
+    },
+    "web_development": {
+      "keywords": ["html", "css", "javascript", "web", "frontend", "backend", "api"],
+      "preferred_models": ["gpt-4o", "claude-3-7-sonnet-20250219", "deepseek-coder"]
+    },
+    "database": {
+      "keywords": ["sql", "database", "query", "schema", "orm", "nosql", "mongodb"],
+      "preferred_models": ["gpt-4o", "claude-3-7-sonnet-20250219", "deepseek-coder"]
+    },
+    "system_script": {
+      "keywords": ["system", "shell", "bash", "command", "script", "automation"],
+      "preferred_models": ["claude-3-7-sonnet-20250219", "gpt-4o", "deepseek-coder"]
+    },
+    "documentation": {
+      "keywords": ["document", "readme", "documentation", "comment", "explain"],
+      "preferred_models": ["claude-3-opus-20240229", "claude-3-7-sonnet-20250219", "gpt-4o"]
+    },
+    "machine_learning": {
+      "keywords": ["machine learning", "ml", "ai", "model", "neural", "train", "predict"],
+      "preferred_models": ["gpt-4o", "claude-3-opus-20240229", "claude-3-7-sonnet-20250219"]
+    },
+    "data_visualization": {
+      "keywords": ["visualization", "chart", "graph", "plot", "dashboard", "d3"],
+      "preferred_models": ["gpt-4o", "claude-3-7-sonnet-20250219", "deepseek-coder"]
+    },
+    "performance_optimization": {
+      "keywords": ["performance", "optimize", "efficiency", "speed", "memory", "fast"],
+      "preferred_models": ["deepseek-coder", "gpt-4o", "claude-3-7-sonnet-20250219"]
+    },
+    "security": {
+      "keywords": ["security", "encryption", "authentication", "authorization", "secure"],
+      "preferred_models": ["claude-3-7-sonnet-20250219", "gpt-4o", "claude-3-opus-20240229"]
+    }
+  },
+  "historical_performance": {
+    "claude-3-7-sonnet-20250219": {
+      "code_generation": 0.92,
+      "data_processing": 0.95,
+      "web_development": 0.88,
+      "database": 0.86,
+      "system_script": 0.90,
+      "documentation": 0.94
+    },
+    "gpt-4o": {
+      "code_generation": 0.93,
+      "data_processing": 0.91,
+      "web_development": 0.94,
+      "database": 0.92,
+      "system_script": 0.89,
+      "documentation": 0.90
+    },
+    "deepseek-coder": {
+      "code_generation": 0.95,
+      "data_processing": 0.88,
+      "web_development": 0.90,
+      "database": 0.85,
+      "system_script": 0.87,
+      "documentation": 0.82
+    }
+  },
+  "adaptive_selection": {
+    "enabled": true,
+    "learning_rate": 0.05,
+    "exploration_factor": 0.1,
+    "history_weight": 0.7,
+    "update_frequency": "daily"
+  },
+  "model_pairing": {
+    "enabled": true,
+    "pairs": [
+      {
+        "planning": "claude-3-opus-20240229",
+        "implementation": "deepseek-coder"
+      },
+      {
+        "planning": "gpt-4o",
+        "implementation": "claude-3-7-sonnet-20250219"
+      },
+      {
+        "complex_tasks": "claude-3-7-sonnet-20250219",
+        "simple_tasks": "claude-3-5-haiku-20240620"
+      }
+    ]
+  }
+}

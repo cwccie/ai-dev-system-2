@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Models - AI Development Orchestration System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <h1>Local Models Management</h1>
+                </div>
+                <div class="col-md-6 text-end">
+                    <span class="user-info">
+                        Logged in as: <strong>{{ current_user.username }}</strong>
+                        <a href="{{ url_for('logout') }}" class="logout-link">Logout</a>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Server Status Overview -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h3 class="mb-0">Server Status</h3>
+                <button id="refresh-servers-btn" class="btn btn-sm btn-primary">Refresh Status</button>
+            </div>
+            <div class="card-body">
+                <div id="server-status-container">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p>Loading server status...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Model Availability -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="mb-0">Available Models</h3>
+            </div>
+            <div class="card-body">
+                <ul class="nav nav-tabs" id="modelTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="coding-tab" data-bs-toggle="tab" data-bs-target="#coding-models" type="button" role="tab">Coding Models</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="orchestration-tab" data-bs-toggle="tab" data-bs-target="#orchestration-models" type="button" role="tab">Orchestration Models</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="all-tab" data-bs-toggle="tab" data-bs-target="#all-models" type="button" role="tab">All Local Models</button>
+                    </li>
+                </ul>
+                
+                <div class="tab-content p-3 border border-top-0 rounded-bottom" id="modelTabsContent">
+                    <div class="tab-pane fade show active" id="coding-models" role="tabpanel">
+                        <div id="coding-models-container">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p>Loading coding models...</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="tab-pane fade" id="orchestration-models" role="tabpanel">
+                        <div id="orchestration-models-container">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p>Loading orchestration models...</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="tab-pane fade" id="all-models" role="tabpanel">
+                        <div id="all-models-container">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p>Loading all models...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Server Management -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="mb-0">Server Management</h3>
+            </div>
+            <div class="card-body">
+                <div class="accordion" id="serverAccordion">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingAddServer">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseAddServer" aria-expanded="false" aria-controls="collapseAddServer">
+                                Add New Server
+                            </button>
+                        </h2>
+                        <div id="collapseAddServer" class="accordion-collapse collapse" aria-labelledby="headingAddServer" data-bs-parent="#serverAccordion">
+                            <div class="accordion-body">
+                                <form id="add-server-form">
+                                    <div class="mb-3">
+                                        <label for="server-id" class="form-label">Server ID</label>
+                                        <input type="text" class="form-control" id="server-id" name="server_id" placeholder="e.g., server5" required>
+                                        <div class="form-text">A unique identifier for this server</div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="server-name" class="form-label">Server Name</label>
+                                        <input type="text" class="form-control" id="server-name" name="server_name" placeholder="e.g., Development Server" required>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="server-url" class="form-label">Server URL</label>
+                                        <input type="url" class="form-control" id="server-url" name="server_url" placeholder="e.g., http://192.168.1.10:11434" required>
+                                        <div class="form-text">The URL where Ollama is running on this server</div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="max-tasks" class="form-label">Max Concurrent Tasks</label>
+                                        <input type="number" class="form-control" id="max-tasks" name="max_tasks" value="3" min="1" max="10" required>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="server-gpu" class="form-label">GPU Model</label>
+                                        <input type="text" class="form-control" id="server-gpu" name="server_gpu" placeholder="e.g., RTX 4090">
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="server-priority" class="form-label">Priority</label>
+                                        <select class="form-select" id="server-priority" name="server_priority">
+                                            <option value="1">1 - High</option>
+                                            <option value="2">2 - Medium</option>
+                                            <option value="3">3 - Low</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <button type="submit" class="btn btn-primary">Add Server</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingManageServers">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseManageServers" aria-expanded="false" aria-controls="collapseManageServers">
+                                Manage Existing Servers
+                            </button>
+                        </h2>
+                        <div id="collapseManageServers" class="accordion-collapse collapse" aria-labelledby="headingManageServers" data-bs-parent="#serverAccordion">
+                            <div class="accordion-body">
+                                <div id="manage-servers-container">
+                                    <div class="text-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                        <p>Loading server management...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Model Configuration Overrides -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="mb-0">Model Configuration</h3>
+            </div>
+            <div class="card-body">
+                <p>Override the recommendations and rankings for different model types:</p>
+                
+                <div class="accordion" id="modelConfigAccordion">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingCodingRanking">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCodingRanking" aria-expanded="false" aria-controls="collapseCodingRanking">
+                                Coding Model Rankings
+                            </button>
+                        </h2>
+                        <div id="collapseCodingRanking" class="accordion-collapse collapse" aria-labelledby="headingCodingRanking" data-bs-parent="#modelConfigAccordion">
+                            <div class="accordion-body">
+                                <p class="form-text mb-3">Drag and drop models to change their ranking order for coding tasks.</p>
+                                <div id="coding-ranking-container" class="sortable-list">
+                                    <div class="text-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                        <p>Loading coding model rankings...</p>
+                                    </div>
+                                </div>
+                                <button id="save-coding-ranking-btn" class="btn btn-primary mt-3">Save Rankings</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingOrchestratingRanking">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOrchestratingRanking" aria-expanded="false" aria-controls="collapseOrchestratingRanking">
+                                Orchestration Model Rankings
+                            </button>
+                        </h2>
+                        <div id="collapseOrchestratingRanking" class="accordion-collapse collapse" aria-labelledby="headingOrchestratingRanking" data-bs-parent="#modelConfigAccordion">
+                            <div class="accordion-body">
+                                <p class="form-text mb-3">Drag and drop models to change their ranking order for orchestration tasks.</p>
+                                <div id="orchestration-ranking-container" class="sortable-list">
+                                    <div class="text-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                        <p>Loading orchestration model rankings...</p>
+                                    </div>
+                                </div>
+                                <button id="save-orchestration-ranking-btn" class="btn btn-primary mt-3">Save Rankings</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingTaskMapping">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseTaskMapping" aria-expanded="false" aria-controls="collapseTaskMapping">
+                                Task-Model Mapping
+                            </button>
+                        </h2>
+                        <div id="collapseTaskMapping" class="accordion-collapse collapse" aria-labelledby="headingTaskMapping" data-bs-parent="#modelConfigAccordion">
+                            <div class="accordion-body">
+                                <p class="form-text mb-3">Configure which models should be used for different task types and complexity levels.</p>
+                                <div id="task-mapping-container">
+                                    <div class="text-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                        <p>Loading task-model mappings...</p>
+                                    </div>
+                                </div>
+                                <button id="save-task-mapping-btn" class="btn btn-primary mt-3">Save Mappings</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Settings -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="mb-0">Local Model Settings</h3>
+            </div>
+            <div class="card-body">
+                <form id="settings-form">
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="auto-failover" name="auto_failover" checked>
+                        <label class="form-check-label" for="auto-failover">Enable automatic failover to another server if a model is unavailable</label>
+                    </div>
+                    
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="load-balancing" name="load_balancing" checked>
+                        <label class="form-check-label" for="load-balancing">Enable load balancing across servers for the same model</label>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="health-check-interval" class="form-label">Health check interval (minutes)</label>
+                            <input type="number" class="form-control" id="health-check-interval" name="health_check_interval" value="5" min="1" max="60">
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="connection-timeout" class="form-label">Connection timeout (seconds)</label>
+                            <input type="number" class="form-control" id="connection-timeout" name="connection_timeout" value="10" min="1" max="120">
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="max-retry-attempts" class="form-label">Max retry attempts</label>
+                            <input type="number" class="form-control" id="max-retry-attempts" name="max_retry_attempts" value="3" min="0" max="10">
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="model-cooldown" class="form-label">Model cooldown (seconds)</label>
+                            <input type="number" class="form-control" id="model-cooldown" name="model_cooldown" value="30" min="0" max="300">
+                            <div class="form-text">Time to wait after a model error before retrying</div>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Save Settings</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="container">
+            <p>AI Development Orchestration System &copy; 2025</p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- SortableJS for drag-and-drop lists -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
+    <!-- Local Models JS -->
+    <script src="{{ url_for('static', filename='js/local_models.js') }}"></script>
+</body>
+</html>
