@@ -1,12 +1,12 @@
 #!/bin/bash
 #
 # AI Code Development Orchestration System
-# Enhanced runner script to set up environment, install dependencies, and run Flask application
-# Modified to prompt for an install location before installing Ollama / WebUI
+# Runner script to set up environment, install dependencies, and run Flask application
+# (Ollama / WebUI references removed)
 
 set -e  # Exit if a command fails
 
-# Create a unique temporary directory
+# Create a unique temporary directory for logs and intermediate files
 TEMP_DIR=$(mktemp -d -t ai-dev-setup-XXXXXXXXXX)
 
 # Cleanup function
@@ -33,9 +33,9 @@ cleanup() {
 }
 
 trap cleanup EXIT
-trap 'exit 130' INT  # Ctrl+C
+trap 'exit 130' INT  # Handle Ctrl+C gracefully
 
-# Colors
+# Colors for console output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -44,10 +44,11 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-# Progress tracking
-TOTAL_STEPS=13  # Increased by 1 to account for our new step
+# Number of setup steps for the progress bar
+TOTAL_STEPS=10
 CURRENT_STEP=0
 
+# Progress bar logic
 progress_bar() {
     local total=$1
     local current=$2
@@ -102,44 +103,13 @@ print_debug() {
     fi
 }
 
+# Check if a command exists
 command_exists() {
     if command -v "$1" >/dev/null 2>&1; then
         return 0
     else
         return 1
     fi
-}
-
-# ---------------------------------------------------
-# New function to let user pick an install directory
-# ---------------------------------------------------
-select_install_location() {
-    print_status "Detecting available block devices..."
-    echo
-    # Show block devices with name/size/mountpoint. Adjust columns as needed.
-    lsblk -o NAME,SIZE,MOUNTPOINT
-    
-    echo
-    print_message "Please specify the directory path you want Ollama/WebUI to use for storing models."
-    print_message "For example, something like /mnt/data or /media/username/SomeDrive, etc."
-    read -p "Enter the full path: " selected_path
-
-    # Basic check if user typed something
-    if [ -z "$selected_path" ]; then
-        print_warning "No path entered. Defaulting to /var/lib/ollama."
-        selected_path="/var/lib/ollama"
-    fi
-
-    # Attempt to create the directory if it doesn’t exist
-    if [ ! -d "$selected_path" ]; then
-        print_status "Creating directory: $selected_path"
-        $USE_SUDO mkdir -p "$selected_path"
-    fi
-
-    # Store this in an env variable that we reuse for Ollama and WebUI
-    export OLLAMA_LIBRARY_DIR="$selected_path"
-    print_success "Models will be installed in: $OLLAMA_LIBRARY_DIR"
-    update_progress
 }
 
 check_required_commands() {
@@ -159,6 +129,7 @@ check_required_commands() {
         exit 1
     fi
     
+    # Optional commands
     local optional_commands=("lsof" "netstat" "gunicorn" "systemctl")
     local missing_optional=()
     for cmd in "${optional_commands[@]}"; do
@@ -213,7 +184,7 @@ show_banner() {
     echo "╚═══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     echo "This script will set up and configure the AI Development Orchestration System"
-    echo "including all necessary dependencies, Python libraries, and Ollama integration."
+    echo "including all necessary Python libraries and a Flask application."
     echo
     echo -e "Total setup steps: ${CYAN}$TOTAL_STEPS${NC}"
     echo "Estimated time: 5-10 minutes (depending on your internet connection)"
@@ -270,7 +241,7 @@ update_system() {
     fi
     
     print_message "Installing essential tools..."
-    essential_tools="net-tools curl wget git build-essential software-properties-common"
+    local essential_tools="net-tools curl wget git build-essential software-properties-common"
     print_status "Tools to be installed: $essential_tools"
     
     if $USE_SUDO apt-get install -y $essential_tools > /tmp/apt-install-tools.log 2>&1; then
@@ -299,6 +270,7 @@ install_python() {
         print_success "Python 3 is already installed"
     fi
     
+    local python_version
     python_version=$(python3 --version | cut -d' ' -f2)
     print_status "Found Python version: $python_version"
     
@@ -345,164 +317,6 @@ install_pip() {
     update_progress
 }
 
-wait_for_ollama() {
-    print_message "Waiting for Ollama service to start..."
-    local max_attempts=30
-    local attempt=0
-    local ollama_ready=false
-    
-    while [ $attempt -lt $max_attempts ]; do
-        if curl -s --head --fail http://localhost:11434/api/tags > /dev/null 2>&1; then
-            ollama_ready=true
-            break
-        fi
-        
-        attempt=$((attempt + 1))
-        if [ $attempt -lt $max_attempts ]; then
-            echo -ne "Waiting for Ollama to start: ${attempt}/${max_attempts}\r"
-            sleep 1
-        fi
-    done
-    
-    if [ "$ollama_ready" = "true" ]; then
-        print_success "Ollama service is running and responding"
-        return 0
-    else
-        print_warning "Ollama might not be running correctly after $max_attempts attempts."
-        print_status "Will continue anyway, but you may need to start Ollama manually."
-        return 1
-    fi
-}
-
-install_ollama() {
-    print_status "Setting up Ollama..."
-    
-    local ollama_running=false
-    if command_exists curl; then
-        if curl -s --head --fail http://localhost:11434/api/tags > /dev/null 2>&1; then
-            print_success "Ollama is already running"
-            ollama_running=true
-        fi
-    fi
-    
-    if [ "$ollama_running" = "false" ]; then
-        if ! command_exists ollama; then
-            print_message "Ollama not found. Installing Ollama..."
-            print_status "Downloading and running Ollama installer..."
-            
-            local ollama_installer="${TEMP_DIR}/ollama-install.sh"
-            if curl -fsSL https://ollama.com/install.sh -o "$ollama_installer"; then
-                chmod +x "$ollama_installer"
-                if $USE_SUDO bash "$ollama_installer" > "${TEMP_DIR}/ollama-install.log" 2>&1; then
-                    print_success "Ollama installed"
-                else
-                    print_error "Failed to install Ollama"
-                    cat "${TEMP_DIR}/ollama-install.log"
-                    exit 1
-                fi
-            else
-                print_error "Failed to download Ollama installer"
-                exit 1
-            fi
-        else
-            print_success "Ollama is already installed"
-        fi
-        
-        print_status "Starting Ollama service..."
-        if command_exists systemctl; then
-            print_status "Using systemd to start Ollama..."
-            if $USE_SUDO systemctl enable --now ollama > "${TEMP_DIR}/ollama-service.log" 2>&1; then
-                if $USE_SUDO systemctl stop ollama >> "${TEMP_DIR}/ollama-service.log" 2>&1; then
-                    # Relaunch with library dir if set
-                    # “systemctl” version of Ollama might not let us pass “--library” easily;
-                    # you may need to override the systemd service file to do so. This is for illustration.
-                    print_status "Restarting Ollama service with custom library path (if applicable)."
-                    if [ -n "$OLLAMA_LIBRARY_DIR" ]; then
-                        # This is an example approach: you’d actually update /etc/systemd/system/ollama.service
-                        # or create an override. We'll do a direct run for demonstration here:
-                        nohup ollama serve --library "$OLLAMA_LIBRARY_DIR" > "${TEMP_DIR}/ollama.log" 2>&1 &
-                        OLLAMA_PID=$!
-                        print_status "Ollama started with PID: $OLLAMA_PID and --library $OLLAMA_LIBRARY_DIR"
-                    else
-                        if $USE_SUDO systemctl start ollama >> "${TEMP_DIR}/ollama-service.log" 2>&1; then
-                            print_success "Ollama service started with systemd"
-                        else
-                            print_error "Failed to start Ollama service"
-                            cat "${TEMP_DIR}/ollama-service.log"
-                            exit 1
-                        fi
-                    fi
-                else
-                    print_error "Failed to stop Ollama service"
-                    cat "${TEMP_DIR}/ollama-service.log"
-                    exit 1
-                fi
-            else
-                print_error "Failed to enable Ollama service"
-                cat "${TEMP_DIR}/ollama-service.log"
-                exit 1
-            fi
-        else
-            print_status "systemd not found, starting Ollama directly..."
-            if pkill -f "ollama serve" > /dev/null 2>&1; then
-                print_status "Killed existing Ollama process"
-            fi
-            if [ -n "$OLLAMA_LIBRARY_DIR" ]; then
-                print_status "Starting Ollama in background, using: $OLLAMA_LIBRARY_DIR"
-                nohup ollama serve --library "$OLLAMA_LIBRARY_DIR" > "${TEMP_DIR}/ollama.log" 2>&1 &
-            else
-                nohup ollama serve > "${TEMP_DIR}/ollama.log" 2>&1 &
-            fi
-            OLLAMA_PID=$!
-            print_status "Ollama started with PID: $OLLAMA_PID"
-        fi
-        
-        wait_for_ollama
-    fi
-    
-    update_progress
-    sleep 5
-    
-    # Verify Ollama is running
-    if curl -s --head http://localhost:11434/api/tags > /dev/null; then
-        print_success "Ollama service is running and responding"
-    else
-        print_warning "Ollama might not be running correctly. Will continue anyway."
-        print_status "You can check the Ollama logs for issues."
-    fi
-    
-    update_progress
-}
-
-# -------------------------------------------------------------
-# Placeholder function for Ollama WebUI that uses the same dir
-# -------------------------------------------------------------
-install_ollama_webui() {
-    print_status "Installing Ollama WebUI..."
-    # This is just a placeholder example. You can customize as needed.
-    # The key is: if WebUI supports specifying a library location, set it here.
-    
-    # For demonstration, we’ll pretend we clone a hypothetical repo:
-    #   git clone https://github.com/someone/ollama-webui
-    # and pass OLLAMA_LIBRARY_DIR to it.
-    
-    # Example only:
-    if [ ! -d "ollama-webui" ]; then
-        print_message "Cloning hypothetical Ollama WebUI..."
-        git clone https://github.com/jmorganca/ollama-webui.git ollama-webui
-        # Then, if the webui has some config or environment variable for the model path:
-        # echo "OLLAMA_LIBRARY_DIR=$OLLAMA_LIBRARY_DIR" >> ollama-webui/.env
-        # etc.
-    else
-        print_status "WebUI repository already exists. Pulling latest changes..."
-        (cd ollama-webui && git pull)
-    fi
-    
-    print_success "Ollama WebUI installed (placeholder)."
-    print_message "Make sure to configure the WebUI to use $OLLAMA_LIBRARY_DIR for models."
-    update_progress
-}
-
 setup_venv() {
     print_status "Setting up Python virtual environment..."
     if [ ! -d "venv" ]; then
@@ -542,7 +356,7 @@ install_dependencies() {
     fi
     
     print_message "Installing main dependencies..."
-    main_deps="flask flask-login anthropic>=0.5.0 tqdm>=4.65.0 python-dotenv aiohttp openai"
+    local main_deps="flask flask-login anthropic>=0.5.0 tqdm>=4.65.0 python-dotenv aiohttp openai"
     print_status "Dependencies to install: $main_deps"
     if pip3 install $main_deps > /tmp/main-deps-install.log 2>&1; then
         print_success "Main dependencies installed"
@@ -607,6 +421,7 @@ check_api_keys() {
         source .env
     fi
     
+    # Example: Anthropic API key
     if [ -z "$ANTHROPIC_API_KEY" ]; then
         print_warning "ANTHROPIC_API_KEY environment variable is not set."
         read -p "Enter your Anthropic API key (or leave blank to skip): " api_key
@@ -624,6 +439,7 @@ check_api_keys() {
         print_success "Anthropic API key detected"
     fi
     
+    # Example: OpenAI API key
     if [ -z "$OPENAI_API_KEY" ]; then
         print_warning "OPENAI_API_KEY environment variable is not set."
         read -p "Enter your OpenAI API key (or leave blank to skip): " api_key
@@ -641,6 +457,7 @@ check_api_keys() {
         print_success "OpenAI API key detected"
     fi
     
+    # Example: DeepSeek API key
     if [ -z "$DEEPSEEK_API_KEY" ]; then
         print_warning "DEEPSEEK_API_KEY environment variable is not set."
         read -p "Enter your DeepSeek API key (or leave blank to skip): " api_key
@@ -656,15 +473,6 @@ check_api_keys() {
         fi
     else
         print_success "DeepSeek API key detected"
-    fi
-    
-    if [ -z "$OLLAMA_API_URL" ]; then
-        print_message "Setting Ollama API URL..."
-        echo "OLLAMA_API_URL=http://localhost:11434" >> .env
-        export OLLAMA_API_URL="http://localhost:11434"
-        print_success "Ollama API URL set to http://localhost:11434"
-    else
-        print_status "Using existing Ollama API URL: $OLLAMA_API_URL"
     fi
     
     update_progress
@@ -715,271 +523,12 @@ create_directories() {
     update_progress
 }
 
-create_ollama_provider() {
-    print_status "Setting up Ollama provider module..."
-    
-    if [ ! -f "model_providers/ollama_provider.py" ]; then
-        print_message "Creating Ollama provider module..."
-        mkdir -p model_providers
-        
-        cat > model_providers/ollama_provider.py << 'EOF_PROVIDER'
-"""
-Ollama Provider
-Implementation for Ollama local models
-"""
-
-import os
-import re
-import json
-import aiohttp
-from typing import Dict, Any, List, Optional
-
-from model_providers.base_provider import BaseModelProvider
-
-
-class OllamaProvider(BaseModelProvider):
-    """
-    Provider implementation for Ollama local models
-    """
-    
-    def __init__(self, api_url: str = None, model: str = "llama3"):
-        """
-        Initialize the Ollama provider
-        
-        Args:
-            api_url: Ollama API URL, defaults to environment variable
-            model: Ollama model to use
-        """
-        self.api_url = api_url or os.environ.get("OLLAMA_API_URL", "http://localhost:11434")
-        self.model = model
-        
-    async def generate_response(self, 
-                               prompt: str, 
-                               system_prompt: Optional[str] = None,
-                               temperature: float = 0.7,
-                               max_tokens: int = 4000) -> str:
-        """
-        Generate a response from Ollama
-        """
-        try:
-            payload = {
-                "model": self.model,
-                "prompt": prompt,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "stream": False
-            }
-            
-            if system_prompt:
-                payload["system"] = system_prompt
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(f"{self.api_url}/api/generate", json=payload) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        raise Exception(f"API Error: {response.status} - {error_text}")
-                    
-                    result = await response.json()
-                    return result.get("response", "")
-        except Exception as e:
-            print(f"Error generating response from Ollama: {e}")
-            return f"Error: {str(e)}"
-    
-    async def extract_code(self, response: str) -> List[str]:
-        """
-        Extract code blocks from Ollama's response
-        """
-        pattern = r'```(?:\w+\n)?(.*?)```'
-        matches = re.findall(pattern, response, re.DOTALL)
-        
-        if not matches and not response.startswith('```') and not response.endswith('```'):
-            lines = response.split('\n')
-            if len(lines) > 1 and any(line.strip().startswith(('def ', 'class ', 'import ', 'from ')) for line in lines):
-                return [response]
-        
-        return matches
-    
-    def get_model_name(self) -> str:
-        return self.model
-    
-    def get_provider_name(self) -> str:
-        return "ollama"
-    
-    def get_context_window(self) -> int:
-        context_windows = {
-            "llama3": 8192,
-            "llama2": 4096,
-            "codellama": 16384,
-            "mistral": 8192,
-            "mixtral": 32768,
-            "phi3": 8192
-        }
-        base_model = self.model.split(':')[0].lower()
-        return context_windows.get(base_model, 4096)
-    
-    def count_tokens(self, text: str) -> int:
-        return len(text.split()) * 1.3
-EOF_PROVIDER
-        
-        print_success "Created model_providers/ollama_provider.py"
-    else
-        print_status "Ollama provider module already exists"
-    fi
-    
-    if [ ! -f "model_providers/__init__.py" ]; then
-        print_status "Creating model_providers/__init__.py with Ollama support..."
-        
-        cat > model_providers/__init__.py << 'EOF_INIT'
-"""
-Model Providers Module
-Factory for getting appropriate model providers
-"""
-
-import os
-import importlib
-from typing import Optional, Any
-
-PROVIDERS = {
-    'ollama': 'model_providers.ollama_provider',
-    'claude': 'model_providers.claude_provider',
-    'openai': 'model_providers.openai_provider',
-    'deepseek': 'model_providers.deepseek_provider'
-}
-
-def get_provider(provider_name: str) -> Optional[Any]:
-    if provider_name not in PROVIDERS:
-        raise ValueError(f"Unknown provider: {provider_name}")
-    
-    api_key_env_vars = {
-        'ollama': 'OLLAMA_API_URL',
-        'claude': 'ANTHROPIC_API_KEY',
-        'openai': 'OPENAI_API_KEY',
-        'deepseek': 'DEEPSEEK_API_KEY'
-    }
-    
-    api_key = os.environ.get(api_key_env_vars.get(provider_name))
-    
-    if provider_name == 'ollama' and not api_key:
-        api_key = "http://localhost:11434"
-    
-    if not api_key and provider_name != 'ollama':
-        print(f"Warning: No API key found for {provider_name}")
-        return None
-    
-    try:
-        module_path = PROVIDERS[provider_name]
-        module = importlib.import_module(module_path)
-        
-        provider_classes = {
-            'ollama': 'OllamaProvider',
-            'claude': 'ClaudeProvider',
-            'openai': 'OpenAIProvider',
-            'deepseek': 'DeepSeekProvider'
-        }
-        
-        provider_class = getattr(module, provider_classes[provider_name])
-        
-        if provider_name == 'ollama':
-            return provider_class(api_url=api_key)
-        else:
-            return provider_class(api_key=api_key)
-    
-    except (ImportError, AttributeError) as e:
-        print(f"Error initializing provider {provider_name}: {e}")
-        return None
-EOF_INIT
-        
-        print_success "Created model_providers/__init__.py with Ollama support"
-    elif ! grep -q "ollama" "model_providers/__init__.py"; then
-        print_status "Updating model_providers/__init__.py to include Ollama..."
-        cp model_providers/__init__.py model_providers/__init__.py.bak
-        
-        sed -i 's/PROVIDERS = {/PROVIDERS = {\n    "ollama": "model_providers.ollama_provider",/g' model_providers/__init__.py
-        sed -i 's/api_key_env_vars = {/api_key_env_vars = {\n        "ollama": "OLLAMA_API_URL",/g' model_providers/__init__.py
-        sed -i 's/provider_classes = {/provider_classes = {\n            "ollama": "OllamaProvider",/g' model_providers/__init__.py
-        
-        print_success "Updated model_providers/__init__.py to include Ollama"
-    else
-        print_success "Ollama provider already included in model_providers/__init__.py"
-    fi
-    
-    update_progress
-}
-
-setup_models() {
-    print_status "Setting up base models in Ollama..."
-    
-    if ! curl -s --head --fail http://localhost:11434/api/tags > /dev/null 2>&1; then
-        print_status "Waiting for Ollama to be ready before downloading models..."
-        if ! wait_for_ollama; then
-            print_warning "Ollama is not running, skipping model downloads"
-            update_progress
-            return
-        fi
-    fi
-    
-    local available_models
-    available_models=$(curl -s http://localhost:11434/api/tags 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d':' -f2 | tr -d '"' | sort || echo "")
-    
-    if echo "$available_models" | grep -q "llama3"; then
-        print_success "llama3 model is already downloaded"
-        update_progress
-        return
-    fi
-    
-    print_message "Downloading base model (llama3)..."
-    print_status "This may take a while depending on your internet connection"
-    
-    local spin='-\|/'
-    local i=0
-    
-    # Pass library param if we have it, else just do normal "ollama pull"
-    if [ -n "$OLLAMA_LIBRARY_DIR" ]; then
-        ollama pull llama3 --library "$OLLAMA_LIBRARY_DIR" > "${TEMP_DIR}/ollama-pull.log" 2>&1 &
-    else
-        ollama pull llama3 > "${TEMP_DIR}/ollama-pull.log" 2>&1 &
-    fi
-    local pull_pid=$!
-    
-    while kill -0 $pull_pid 2>/dev/null; do
-        i=$(( (i+1) % 4 ))
-        printf "\r${CYAN}Downloading model... ${spin:$i:1} ${NC}"
-        sleep 0.5
-    done
-    
-    if wait $pull_pid; then
-        printf "\r${GREEN}Download complete!     ${NC}\n"
-        print_success "Successfully pulled llama3 model"
-    else
-        printf "\r${RED}Download failed!      ${NC}\n"
-        print_warning "Failed to pull llama3 model"
-        print_status "You can manually download models later with 'ollama pull <model>'"
-        cat "${TEMP_DIR}/ollama-pull.log"
-        
-        print_status "Trying to pull a smaller model (phi) as fallback..."
-        if [ -n "$OLLAMA_LIBRARY_DIR" ]; then
-            ollama pull phi --library "$OLLAMA_LIBRARY_DIR" > "${TEMP_DIR}/ollama-pull-phi.log" 2>&1
-        else
-            ollama pull phi > "${TEMP_DIR}/ollama-pull-phi.log" 2>&1
-        fi
-        
-        if [ $? -eq 0 ]; then
-            print_success "Successfully pulled phi model (lightweight alternative)"
-        else
-            print_warning "Failed to pull any models. You'll need to pull them manually."
-            cat "${TEMP_DIR}/ollama-pull-phi.log"
-        fi
-    fi
-    
-    update_progress
-}
-
 verify_config() {
     print_status "Verifying application configuration..."
     
     if [ ! -f "app.py" ]; then
         print_warning "app.py not found in the current directory"
-        print_status "Make sure you're in the right directory or create app.py"
+        print_status "Make sure you're in the correct folder or create app.py"
     else
         print_status "Found app.py"
     fi
@@ -1013,9 +562,10 @@ start_flask() {
     export FLASK_APP=app.py
     print_status "Set FLASK_APP=app.py"
     
-    LOG_FILE="logs/flask_$(date +%Y%m%d_%H%M%S).log"
+    local LOG_FILE="logs/flask_$(date +%Y%m%d_%H%M%S).log"
     print_status "Logs will be written to: $LOG_FILE"
     
+    # Check port 9000 usage
     if command_exists lsof; then
         PORT_PID=$(lsof -ti:9000 2>/dev/null)
         if [ ! -z "$PORT_PID" ]; then
@@ -1043,7 +593,7 @@ start_flask() {
     
     print_message "Starting Flask application on http://0.0.0.0:9000"
     if command_exists gunicorn; then
-        print_status "Using gunicorn for production-ready server..."
+        print_status "Using gunicorn for a production-ready server..."
         nohup gunicorn -b 0.0.0.0:9000 -w 4 --access-logfile logs/access.log --error-logfile logs/error.log app:app > "$LOG_FILE" 2>&1 &
         FLASK_PID=$!
     else
@@ -1072,6 +622,7 @@ start_flask() {
         exit 1
     fi
     
+    local LOCAL_IP
     LOCAL_IP=$(hostname -I | awk '{print $1}')
     if [ -z "$LOCAL_IP" ]; then
         LOCAL_IP="localhost"
@@ -1082,7 +633,6 @@ start_flask() {
     echo
     echo -e "${BOLD}${GREEN}====== Application Summary ======${NC}"
     echo -e "${BOLD}Flask Web Interface:${NC} http://$LOCAL_IP:9000"
-    echo -e "${BOLD}Ollama API:${NC} http://$LOCAL_IP:11434"
     echo -e "${BOLD}Log File:${NC} $(pwd)/$LOG_FILE"
     echo -e "${BOLD}Process ID:${NC} $FLASK_PID (use 'kill $FLASK_PID' to stop)"
     echo
@@ -1102,11 +652,6 @@ main() {
     check_root
     detect_os
     
-    # --------------------------------------------------------
-    # Step: Prompt user for the Ollama install (models) drive
-    # --------------------------------------------------------
-    select_install_location
-    
     if [ "$SKIP_SYSTEM" = "false" ]; then
         print_message "Preparing system..."
         update_system
@@ -1119,30 +664,11 @@ main() {
         update_progress
     fi
     
-    if [ "$SKIP_OLLAMA" = "false" ]; then
-        print_message "Setting up Ollama..."
-        install_ollama
-    else
-        print_message "Skipping Ollama installation as requested."
-        update_progress
-    fi
-    
-    print_message "Installing Ollama WebUI (placeholder)..."
-    install_ollama_webui
-    
     print_message "Setting up Python environment..."
     setup_venv
     install_dependencies
     check_api_keys
     create_directories
-    create_ollama_provider
-    
-    if [ "$SKIP_OLLAMA" = "false" ]; then
-        setup_models
-    else
-        print_message "Skipping model downloads as Ollama is skipped."
-        update_progress
-    fi
     
     verify_config
     
@@ -1151,12 +677,13 @@ main() {
     
     END_TIME=$(date +%s)
     TOTAL_TIME=$((END_TIME - START_TIME))
-    MINUTES=$((TOTAL_TIME / 60))
-    SECONDS=$((TOTAL_TIME % 60))
+    local MINUTES=$((TOTAL_TIME / 60))
+    local SECONDS=$((TOTAL_TIME % 60))
     
     print_success "Setup completed in ${MINUTES}m ${SECONDS}s"
 }
 
+# Debug mode checks
 if [ "$DEBUG" = "true" ]; then
     print_warning "Debug mode enabled"
     print_debug "Bash version: $BASH_VERSION"
@@ -1165,6 +692,7 @@ if [ "$DEBUG" = "true" ]; then
     set -x
 fi
 
+# Help flag
 if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
     echo -e "${BOLD}${BLUE}AI Development Orchestration System Setup Script${NC}"
     echo
@@ -1174,7 +702,6 @@ if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
     echo "  --help, -h     Show this help message"
     echo "  --debug        Enable debug output"
     echo "  --skip-system  Skip system updates and tool installation"
-    echo "  --skip-ollama  Skip Ollama installation"
     echo
     echo "Environment variables:"
     echo "  DEBUG=true     Enable debug mode"
@@ -1182,9 +709,10 @@ if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
     exit 0
 fi
 
+# Default flags
 SKIP_SYSTEM=false
-SKIP_OLLAMA=false
 
+# Parse arguments
 for arg in "$@"; do
     case $arg in
         --debug)
@@ -1194,10 +722,6 @@ for arg in "$@"; do
         --skip-system)
             SKIP_SYSTEM=true
             print_warning "Skipping system updates and tool installation"
-            ;;
-        --skip-ollama)
-            SKIP_OLLAMA=true
-            print_warning "Skipping Ollama installation"
             ;;
         *)
             print_warning "Unknown option: $arg"
@@ -1210,6 +734,7 @@ export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 [ -z "$DEBUG" ] && DEBUG=false
 
+# Run main if script is executed, not sourced
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main
 else
