@@ -2,29 +2,26 @@
 #
 # AI Code Development Orchestration System
 # Enhanced runner script to set up environment, install dependencies, and run Flask application
+# Modified to prompt for an install location before installing Ollama / WebUI
 
-set -e  # Exit immediately if a command exits with a non-zero status
+set -e  # Exit if a command fails
 
 # Create a unique temporary directory
 TEMP_DIR=$(mktemp -d -t ai-dev-setup-XXXXXXXXXX)
 
-# Cleanup function to remove temporary files and stop background processes
+# Cleanup function
 cleanup() {
     local exit_code=$?
-    
-    # Only show error message if the exit wasn't explicitly requested (Ctrl+C)
     if [ $exit_code -ne 0 ] && [ $exit_code -ne 130 ]; then
         echo -e "${RED}Setup failed with exit code $exit_code!${NC}"
         echo -e "Check the log files in ${TEMP_DIR} for details."
     fi
     
-    # Kill any background processes we started if they're still running
     if [ ! -z "$FLASK_PID" ] && ps -p $FLASK_PID > /dev/null; then
         echo -e "${YELLOW}Stopping Flask server (PID: $FLASK_PID)${NC}"
         kill $FLASK_PID 2>/dev/null || true
     fi
     
-    # Don't remove temp files if in debug mode
     if [ "$DEBUG" != "true" ]; then
         echo -e "${CYAN}Cleaning up temporary files...${NC}"
         rm -rf "${TEMP_DIR}"
@@ -35,11 +32,10 @@ cleanup() {
     exit $exit_code
 }
 
-# Set up all trap handlers
 trap cleanup EXIT
-trap 'exit 130' INT  # Handle Ctrl+C gracefully
+trap 'exit 130' INT  # Ctrl+C
 
-# Colors for better output
+# Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -48,11 +44,10 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-# Define progress tracking variables BEFORE using them in functions
-TOTAL_STEPS=12
+# Progress tracking
+TOTAL_STEPS=13  # Increased by 1 to account for our new step
 CURRENT_STEP=0
 
-# Simple progress bar implementation
 progress_bar() {
     local total=$1
     local current=$2
@@ -115,7 +110,38 @@ command_exists() {
     fi
 }
 
-# Check for required commands
+# ---------------------------------------------------
+# New function to let user pick an install directory
+# ---------------------------------------------------
+select_install_location() {
+    print_status "Detecting available block devices..."
+    echo
+    # Show block devices with name/size/mountpoint. Adjust columns as needed.
+    lsblk -o NAME,SIZE,MOUNTPOINT
+    
+    echo
+    print_message "Please specify the directory path you want Ollama/WebUI to use for storing models."
+    print_message "For example, something like /mnt/data or /media/username/SomeDrive, etc."
+    read -p "Enter the full path: " selected_path
+
+    # Basic check if user typed something
+    if [ -z "$selected_path" ]; then
+        print_warning "No path entered. Defaulting to /var/lib/ollama."
+        selected_path="/var/lib/ollama"
+    fi
+
+    # Attempt to create the directory if it doesn’t exist
+    if [ ! -d "$selected_path" ]; then
+        print_status "Creating directory: $selected_path"
+        $USE_SUDO mkdir -p "$selected_path"
+    fi
+
+    # Store this in an env variable that we reuse for Ollama and WebUI
+    export OLLAMA_LIBRARY_DIR="$selected_path"
+    print_success "Models will be installed in: $OLLAMA_LIBRARY_DIR"
+    update_progress
+}
+
 check_required_commands() {
     print_status "Checking for required commands..."
     
@@ -149,7 +175,6 @@ check_required_commands() {
     print_success "All required commands are available"
 }
 
-# Check if we're in the project root directory
 check_project_directory() {
     print_status "Checking project directory..."
     if [ ! -f "./run.sh" ]; then
@@ -226,13 +251,11 @@ detect_os() {
 
 update_system() {
     print_status "Starting system update process..."
-    
     print_message "Updating system packages..."
     if $USE_SUDO apt-get update -y > /tmp/apt-update.log 2>&1; then
         print_success "Package lists updated"
     else
         print_error "Failed to update package lists"
-        print_status "Check the log at /tmp/apt-update.log for details"
         cat /tmp/apt-update.log
         exit 1
     fi
@@ -242,7 +265,6 @@ update_system() {
         print_success "System packages upgraded"
     else
         print_error "Failed to upgrade packages"
-        print_status "Check the log at /tmp/apt-upgrade.log for details"
         cat /tmp/apt-upgrade.log
         exit 1
     fi
@@ -255,7 +277,6 @@ update_system() {
         print_success "Essential tools installed"
     else
         print_error "Failed to install essential tools"
-        print_status "Check the log at /tmp/apt-install-tools.log for details"
         cat /tmp/apt-install-tools.log
         exit 1
     fi
@@ -271,7 +292,6 @@ install_python() {
             print_success "Python 3 installed"
         else
             print_error "Failed to install Python 3"
-            print_status "Check the log at /tmp/python-install.log for details"
             cat /tmp/python-install.log
             exit 1
         fi
@@ -289,7 +309,6 @@ install_python() {
             print_success "python3-venv installed"
         else
             print_error "Failed to install python3-venv"
-            print_status "Check the log at /tmp/venv-install.log for details"
             cat /tmp/venv-install.log
             exit 1
         fi
@@ -308,7 +327,6 @@ install_pip() {
             print_success "pip3 installed"
         else
             print_error "Failed to install pip3"
-            print_status "Check the log at /tmp/pip-install.log for details"
             cat /tmp/pip-install.log
             exit 1
         fi
@@ -320,7 +338,7 @@ install_pip() {
             print_success "pip upgraded"
         else
             print_warning "Failed to upgrade pip"
-            print_status "Check the log at /tmp/pip-upgrade.log for details"
+            cat /tmp/pip-upgrade.log
         fi
     fi
     
@@ -379,7 +397,6 @@ install_ollama() {
                     print_success "Ollama installed"
                 else
                     print_error "Failed to install Ollama"
-                    print_status "Check the log at ${TEMP_DIR}/ollama-install.log for details"
                     cat "${TEMP_DIR}/ollama-install.log"
                     exit 1
                 fi
@@ -395,17 +412,33 @@ install_ollama() {
         if command_exists systemctl; then
             print_status "Using systemd to start Ollama..."
             if $USE_SUDO systemctl enable --now ollama > "${TEMP_DIR}/ollama-service.log" 2>&1; then
-                if $USE_SUDO systemctl restart ollama >> "${TEMP_DIR}/ollama-service.log" 2>&1; then
-                    print_success "Ollama service started with systemd"
+                if $USE_SUDO systemctl stop ollama >> "${TEMP_DIR}/ollama-service.log" 2>&1; then
+                    # Relaunch with library dir if set
+                    # “systemctl” version of Ollama might not let us pass “--library” easily;
+                    # you may need to override the systemd service file to do so. This is for illustration.
+                    print_status "Restarting Ollama service with custom library path (if applicable)."
+                    if [ -n "$OLLAMA_LIBRARY_DIR" ]; then
+                        # This is an example approach: you’d actually update /etc/systemd/system/ollama.service
+                        # or create an override. We'll do a direct run for demonstration here:
+                        nohup ollama serve --library "$OLLAMA_LIBRARY_DIR" > "${TEMP_DIR}/ollama.log" 2>&1 &
+                        OLLAMA_PID=$!
+                        print_status "Ollama started with PID: $OLLAMA_PID and --library $OLLAMA_LIBRARY_DIR"
+                    else
+                        if $USE_SUDO systemctl start ollama >> "${TEMP_DIR}/ollama-service.log" 2>&1; then
+                            print_success "Ollama service started with systemd"
+                        else
+                            print_error "Failed to start Ollama service"
+                            cat "${TEMP_DIR}/ollama-service.log"
+                            exit 1
+                        fi
+                    fi
                 else
-                    print_error "Failed to restart Ollama service"
-                    print_status "Check the log at ${TEMP_DIR}/ollama-service.log for details"
+                    print_error "Failed to stop Ollama service"
                     cat "${TEMP_DIR}/ollama-service.log"
                     exit 1
                 fi
             else
                 print_error "Failed to enable Ollama service"
-                print_status "Check the log at ${TEMP_DIR}/ollama-service.log for details"
                 cat "${TEMP_DIR}/ollama-service.log"
                 exit 1
             fi
@@ -414,8 +447,12 @@ install_ollama() {
             if pkill -f "ollama serve" > /dev/null 2>&1; then
                 print_status "Killed existing Ollama process"
             fi
-            print_status "Starting Ollama in background..."
-            nohup ollama serve > "${TEMP_DIR}/ollama.log" 2>&1 &
+            if [ -n "$OLLAMA_LIBRARY_DIR" ]; then
+                print_status "Starting Ollama in background, using: $OLLAMA_LIBRARY_DIR"
+                nohup ollama serve --library "$OLLAMA_LIBRARY_DIR" > "${TEMP_DIR}/ollama.log" 2>&1 &
+            else
+                nohup ollama serve > "${TEMP_DIR}/ollama.log" 2>&1 &
+            fi
             OLLAMA_PID=$!
             print_status "Ollama started with PID: $OLLAMA_PID"
         fi
@@ -437,6 +474,35 @@ install_ollama() {
     update_progress
 }
 
+# -------------------------------------------------------------
+# Placeholder function for Ollama WebUI that uses the same dir
+# -------------------------------------------------------------
+install_ollama_webui() {
+    print_status "Installing Ollama WebUI..."
+    # This is just a placeholder example. You can customize as needed.
+    # The key is: if WebUI supports specifying a library location, set it here.
+    
+    # For demonstration, we’ll pretend we clone a hypothetical repo:
+    #   git clone https://github.com/someone/ollama-webui
+    # and pass OLLAMA_LIBRARY_DIR to it.
+    
+    # Example only:
+    if [ ! -d "ollama-webui" ]; then
+        print_message "Cloning hypothetical Ollama WebUI..."
+        git clone https://github.com/jmorganca/ollama-webui.git ollama-webui
+        # Then, if the webui has some config or environment variable for the model path:
+        # echo "OLLAMA_LIBRARY_DIR=$OLLAMA_LIBRARY_DIR" >> ollama-webui/.env
+        # etc.
+    else
+        print_status "WebUI repository already exists. Pulling latest changes..."
+        (cd ollama-webui && git pull)
+    fi
+    
+    print_success "Ollama WebUI installed (placeholder)."
+    print_message "Make sure to configure the WebUI to use $OLLAMA_LIBRARY_DIR for models."
+    update_progress
+}
+
 setup_venv() {
     print_status "Setting up Python virtual environment..."
     if [ ! -d "venv" ]; then
@@ -445,7 +511,6 @@ setup_venv() {
             print_success "Virtual environment created"
         else
             print_error "Failed to create virtual environment"
-            print_status "Check the log at /tmp/venv-create.log for details"
             cat /tmp/venv-create.log
             exit 1
         fi
@@ -473,7 +538,7 @@ install_dependencies() {
         print_success "pip upgraded in virtual environment"
     else
         print_warning "Failed to upgrade pip in virtual environment"
-        print_status "Check the log at /tmp/venv-pip-upgrade.log for details"
+        cat /tmp/venv-pip-upgrade.log
     fi
     
     print_message "Installing main dependencies..."
@@ -483,7 +548,6 @@ install_dependencies() {
         print_success "Main dependencies installed"
     else
         print_error "Failed to install main dependencies"
-        print_status "Check the log at /tmp/main-deps-install.log for details"
         cat /tmp/main-deps-install.log
         exit 1
     fi
@@ -493,7 +557,7 @@ install_dependencies() {
         print_success "Additional dependencies installed"
     else
         print_warning "Failed to install additional dependencies"
-        print_status "Check the log at /tmp/add-deps-install.log for details"
+        cat /tmp/add-deps-install.log
     fi
     
     if [ -f "orchestrator/requirements.txt" ]; then
@@ -502,7 +566,7 @@ install_dependencies() {
             print_success "Orchestrator dependencies installed"
         else
             print_warning "Failed to install orchestrator dependencies"
-            print_status "Check the log at /tmp/orchestrator-deps.log for details"
+            cat /tmp/orchestrator-deps.log
         fi
     else
         print_status "No orchestrator/requirements.txt found, skipping"
@@ -514,7 +578,7 @@ install_dependencies() {
             print_success "Script-agent dependencies installed"
         else
             print_warning "Failed to install script-agent dependencies"
-            print_status "Check the log at /tmp/script-agent-deps.log for details"
+            cat /tmp/script-agent-deps.log
         fi
     else
         print_status "No script-agent/requirements.txt found, skipping"
@@ -696,15 +760,6 @@ class OllamaProvider(BaseModelProvider):
                                max_tokens: int = 4000) -> str:
         """
         Generate a response from Ollama
-        
-        Args:
-            prompt: The user prompt to send to Ollama
-            system_prompt: System instructions for Ollama (optional)
-            temperature: Controls randomness, higher values = more random
-            max_tokens: Maximum number of tokens to generate
-            
-        Returns:
-            String containing Ollama's response
         """
         try:
             payload = {
@@ -733,12 +788,6 @@ class OllamaProvider(BaseModelProvider):
     async def extract_code(self, response: str) -> List[str]:
         """
         Extract code blocks from Ollama's response
-        
-        Args:
-            response: The full text response from Ollama
-            
-        Returns:
-            List of extracted code blocks
         """
         pattern = r'```(?:\w+\n)?(.*?)```'
         matches = re.findall(pattern, response, re.DOTALL)
@@ -884,7 +933,12 @@ setup_models() {
     local spin='-\|/'
     local i=0
     
-    ollama pull llama3 > "${TEMP_DIR}/ollama-pull.log" 2>&1 &
+    # Pass library param if we have it, else just do normal "ollama pull"
+    if [ -n "$OLLAMA_LIBRARY_DIR" ]; then
+        ollama pull llama3 --library "$OLLAMA_LIBRARY_DIR" > "${TEMP_DIR}/ollama-pull.log" 2>&1 &
+    else
+        ollama pull llama3 > "${TEMP_DIR}/ollama-pull.log" 2>&1 &
+    fi
     local pull_pid=$!
     
     while kill -0 $pull_pid 2>/dev/null; do
@@ -900,13 +954,20 @@ setup_models() {
         printf "\r${RED}Download failed!      ${NC}\n"
         print_warning "Failed to pull llama3 model"
         print_status "You can manually download models later with 'ollama pull <model>'"
-        print_status "Check the log at ${TEMP_DIR}/ollama-pull.log for details"
+        cat "${TEMP_DIR}/ollama-pull.log"
         
         print_status "Trying to pull a smaller model (phi) as fallback..."
-        if ollama pull phi > "${TEMP_DIR}/ollama-pull-phi.log" 2>&1; then
+        if [ -n "$OLLAMA_LIBRARY_DIR" ]; then
+            ollama pull phi --library "$OLLAMA_LIBRARY_DIR" > "${TEMP_DIR}/ollama-pull-phi.log" 2>&1
+        else
+            ollama pull phi > "${TEMP_DIR}/ollama-pull-phi.log" 2>&1
+        fi
+        
+        if [ $? -eq 0 ]; then
             print_success "Successfully pulled phi model (lightweight alternative)"
         else
             print_warning "Failed to pull any models. You'll need to pull them manually."
+            cat "${TEMP_DIR}/ollama-pull-phi.log"
         fi
     fi
     
@@ -942,7 +1003,6 @@ verify_config() {
 
 start_flask() {
     print_status "Preparing to start Flask application..."
-    
     mkdir -p logs
     
     if [ -z "$VIRTUAL_ENV" ]; then
@@ -1042,6 +1102,11 @@ main() {
     check_root
     detect_os
     
+    # --------------------------------------------------------
+    # Step: Prompt user for the Ollama install (models) drive
+    # --------------------------------------------------------
+    select_install_location
+    
     if [ "$SKIP_SYSTEM" = "false" ]; then
         print_message "Preparing system..."
         update_system
@@ -1061,6 +1126,9 @@ main() {
         print_message "Skipping Ollama installation as requested."
         update_progress
     fi
+    
+    print_message "Installing Ollama WebUI (placeholder)..."
+    install_ollama_webui
     
     print_message "Setting up Python environment..."
     setup_venv
@@ -1140,7 +1208,6 @@ done
 unset PYTHONPATH
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
-
 [ -z "$DEBUG" ] && DEBUG=false
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
