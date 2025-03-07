@@ -1,9 +1,317 @@
-#!/bin/bash
+# Wait for Ollama to be ready
+wait_for_ollama() {
+    print_message "Waiting for Ollama service to start..."
+    local max_attempts=30
+    local attempt=0
+    local ollama_ready=false
+    
+    while [ $attempt -lt $max_attempts ]; do
+        if curl -s --head --fail http://localhost:11434/api/tags > /dev/null 2>&1; then
+            ollama_ready=true
+            break
+        fi
+        
+        attempt=$((attempt + 1))
+        if [ $attempt -lt $max_attempts ]; then
+            echo -ne "Waiting for Ollama to start: ${attempt}/${max_attempts}\r"
+            sleep 1
+        fi
+    done
+    
+    if [ "$ollama_ready" = "true" ]; then
+        print_success "Ollama service is running and responding"
+        return 0
+    else
+        print_warning "Ollama might not be running correctly after $max_attempts attempts."
+        print_status "Will continue anyway, but you may need to start Ollama manually."
+        return 1
+    fi
+}# Start the Flask application
+start_flask() {
+    print_status "Preparing to start Flask application..."
+    
+    # Create logs directory if it doesn't exist
+    mkdir -p logs
+    
+    # Activate virtual environment if not already activated
+    if [ -z "$VIRTUAL_ENV" ]; then
+        print_status "Activating virtual environment..."
+        source venv/bin/activate
+    fi
+    
+    # Set Flask environment variables
+    export FLASK_APP=app.py
+    print_status "Set FLASK_APP=app.py"
+    
+    # Create a more descriptive log file name with timestamp
+    LOG_FILE="logs/flask_$(date +%Y%m%d_%H%M%S).log"
+    print_status "Logs will be written to: $LOG_FILE"
+    
+    # Check if port 9000 is already in use
+    if command_exists lsof; then
+        PORT_PID=$(lsof -ti:9000 2>/dev/null)
+        if [ ! -z "$PORT_PID" ]; then
+            print_warning "Port 9000 is already in use by process $PORT_PID"
+            read -p "Do you want to stop the existing process and continue? (y/n): " stop_process
+            if [[ "$stop_process" == "y" || "$stop_process" == "Y" ]]; then
+                print_status "Stopping process $PORT_PID..."
+                kill -9 $PORT_PID 2>/dev/null || $USE_SUDO kill -9 $PORT_PID
+                sleep 2  # Give the system time to free the port
+            else
+                print_error "Port 9000 is already in use. Please stop the existing process or use a different port."
+                exit 1
+            fi
+        fi
+    elif command_exists netstat; then
+        if netstat -tuln | grep -q ":9000 "; then
+            print_warning "Port 9000 is already in use"
+            read -p "Do you want to continue anyway? (y/n): " continue_anyway
+            if [[ "$continue_anyway" != "y" && "$continue_anyway" != "Y" ]]; then
+                print_error "Aborted by user"
+                exit 1
+            fi
+        fi
+    fi
+    
+    # Start Flask in background
+    print_message "Starting Flask application on http://0.0.0.0:9000"
+    if command_exists gunicorn; then
+        print_status "Using gunicorn for production-ready server..."
+        nohup gunicorn -b 0.0.0.0:9000 -w 4 --access-logfile logs/access.log --error-logfile logs/error.log app:app > "$LOG_FILE" 2>&1 &
+        FLASK_PID=$!
+    else
+        print_status "Using Flask development server (consider installing gunicorn for production)..."
+        nohup flask run --host=0.0.0.0 --port=9000 > "$LOG_FILE" 2>&1 &
+        FLASK_PID=$!
+    fi
+    
+    # Wait a moment for the server to start
+    print_status "Waiting for server to start..."
+    sleep 3
+    
+    # Check if the process is still running
+    if ps -p $FLASK_PID > /dev/null; then
+        print_success "Application started in background with PID: $FLASK_PID"
+        
+        # Verify server is responding
+        if command_exists curl; then
+            if curl -s --head --fail http://localhost:9000 > /dev/null; then
+                print_success "Server is responding to requests"
+            else
+                print_warning "Server is running but not responding yet. It may need more time to initialize."
+            fi
+        fi
+    else
+        print_error "Flask application failed to start"
+        print_status "Check the log at $LOG_FILE for details"
+        cat "$LOG_FILE"
+        exit 1
+    fi
+    
+    # Try to get the local IP address for user convenience
+    LOCAL_IP=$(hostname -I | awk '{print $1}')
+    if [ -z "$LOCAL_IP" ]; then
+        LOCAL_IP="localhost"
+    fi
+    
+    update_progress
+    
+    # Print summary information
+    echo
+    echo -e "${BOLD}${GREEN}====== Application Summary ======${NC}"
+    echo -e "${BOLD}Flask Web Interface:${NC} http://$LOCAL_IP:9000"
+    echo -e "${BOLD}Ollama API:${NC} http://$LOCAL_IP:11434"
+    echo -e "${BOLD}Log File:${NC} $(pwd)/$LOG_FILE"
+    echo -e "${BOLD}Process ID:${NC} $FLASK_PID (use 'kill $FLASK_PID' to stop)"
+    echo
+    echo -e "${BOLD}${GREEN}==================================${NC}"
+    echo
+    print_message "AI Development Orchestration System is now running!"
+}
+
+# Main function
+main() {
+    show_banner
+    
+    # Start timestamp
+    START_TIME=$(date +%s)
+    
+    # Print starting message with timestamp
+    print_message "Starting AI Code Development Orchestration System setup at $(date)"
+    
+    # Check project directory and required commands
+    check_project_directory
+    check_required_commands
+    
+    # Check if running as root and detect OS
+    check_root
+    detect_os
+    
+    # Update and install system packages
+    if [ "$SKIP_SYSTEM" = "false" ]; then
+        print_message "Preparing system..."
+        update_system
+        install_python
+        install_pip
+    else
+        print_message "Skipping system updates as requested."
+        # Skip progress steps
+        update_progress
+        update_progress
+        update_progress
+    fi
+    
+    # Install and configure Ollama
+    if [ "$SKIP_OLLAMA" = "false" ]; then
+        print_message "Setting up Ollama..."
+        install_ollama
+    else
+        print_message "Skipping Ollama installation as requested."
+        update_progress
+    fi
+    
+    # Set up the Python environment
+    print_message "Setting up Python environment..."
+    setup_venv
+    install_dependencies
+    check_api_keys
+    create_directories
+    create_ollama_provider
+    
+    # Set up models
+    if [ "$SKIP_OLLAMA" = "false" ]; then
+        setup_models
+    else
+        print_message "Skipping model downloads as Ollama is skipped."
+        update_progress
+    fi
+    
+    # Verify configuration
+    verify_config
+    
+    # Start the Flask application
+    print_message "Starting Flask application..."
+    start_flask
+    
+    # Calculate and display total execution time
+    END_TIME=$(date +%s)
+    TOTAL_TIME=$((END_TIME - START_TIME))
+    MINUTES=$((TOTAL_TIME / 60))
+    SECONDS=$((TOTAL_TIME % 60))
+    
+    print_success "Setup completed in ${MINUTES}m ${SECONDS}s"
+}
+
+# Enable debug mode with environment variable 
+# DEBUG=true ./run.sh
+if [ "$DEBUG" = "true" ]; then
+    print_warning "Debug mode enabled"
+    # Print environment information
+    print_debug "Bash version: $BASH_VERSION"
+    print_debug "OS details: $(uname -a)"
+    print_debug "Current working directory: $(pwd)"
+    set -x  # Print each command before executing
+fi
+
+# Check if a help flag is provided
+if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
+    echo -e "${BOLD}${BLUE}AI Development Orchestration System Setup Script${NC}"
+    echo
+    echo "Usage: ./run.sh [OPTIONS]"
+    echo
+    echo "Options:"
+    echo "  --help, -h     Show this help message"
+    echo "  --debug        Enable debug output"
+    echo "  --skip-system  Skip system updates and tool installation"
+    echo "  --skip-ollama  Skip Ollama installation"
+    echo
+    echo "Environment variables:"
+    echo "  DEBUG=true     Enable debug mode"
+    echo
+    exit 0
+fi
+
+# Handle command line arguments
+SKIP_SYSTEM=false
+SKIP_OLLAMA=false
+
+for arg in "$@"; do
+    case $arg in
+        --debug)
+            DEBUG=true
+            print_warning "Debug mode enabled"
+            ;;
+        --skip-system)
+            SKIP_SYSTEM=true
+            print_warning "Skipping system updates and tool installation"
+            ;;
+        --skip-ollama)
+            SKIP_OLLAMA=true
+            print_warning "Skipping Ollama installation"
+            ;;
+        *)
+            # Unknown option
+            print_warning "Unknown option: $arg"
+            ;;
+    esac
+done
+
+# Run the main function - make sure we're in a clean environment
+unset PYTHONPATH
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+
+# Set default value for debug mode
+[ -z "$DEBUG" ] && DEBUG=false
+
+# Check if the script is being sourced or executed
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    # Script is being executed
+    main
+else
+    # Script is being sourced
+    print_warning "This script is meant to be executed, not sourced."
+    print_message "Run it with: ./run.sh [OPTIONS]"
+fi#!/bin/bash
 
 # AI Code Development Orchestration System
-# Enhanced runner script to set up environment, install all dependencies, and run Flask
+# Enhanced runner script to set up environment, install dependencies, and run Flask application
 
 set -e  # Exit immediately if a command exits with a non-zero status
+
+# Create a unique temporary directory
+TEMP_DIR=$(mktemp -d -t ai-dev-setup-XXXXXXXXXX)
+
+# Cleanup function to remove temporary files and stop background processes
+cleanup() {
+    local exit_code=$?
+    
+    # Only show error message if the exit wasn't explicitly requested (Ctrl+C)
+    if [ $exit_code -ne 0 ] && [ $exit_code -ne 130 ]; then
+        echo -e "${RED}Setup failed with exit code $exit_code!${NC}"
+        echo -e "Check the log files in ${TEMP_DIR} for details."
+    fi
+    
+    # Kill any background processes we started if they're still running
+    if [ ! -z "$FLASK_PID" ] && ps -p $FLASK_PID > /dev/null; then
+        echo -e "${YELLOW}Stopping Flask server (PID: $FLASK_PID)${NC}"
+        kill $FLASK_PID 2>/dev/null || true
+    fi
+    
+    # Don't remove temp files if in debug mode
+    if [ "$DEBUG" != "true" ]; then
+        echo -e "${CYAN}Cleaning up temporary files...${NC}"
+        rm -rf "${TEMP_DIR}"
+    else
+        echo -e "${YELLOW}Debug mode: Keeping temporary files in ${TEMP_DIR}${NC}"
+    fi
+    
+    exit $exit_code
+}
+
+# Set up all trap handlers
+trap cleanup EXIT
+trap 'exit 130' INT  # Handle Ctrl+C gracefully
 
 # Colors for better output
 GREEN='\033[0;32m'
@@ -14,6 +322,11 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
+# Define progress tracking variables BEFORE using them in functions
+TOTAL_STEPS=12
+CURRENT_STEP=0
+
+# Define all helper functions first
 # Function to print colored messages
 print_message() {
     echo -e "${BLUE}[AI-Dev-Orchestrator]${NC} $1"
@@ -67,22 +380,8 @@ progress_bar() {
     fi
 }
 
-# Count total steps for progress tracking
-TOTAL_STEPS=12
-CURRENT_STEP=0
-
-update_progress
-
-    # Print summary information
-    echo
-    echo -e "${BOLD}${GREEN}====== Application Summary ======${NC}"
-    echo -e "${BOLD}Flask Web Interface:${NC} http://$LOCAL_IP:9000"
-    echo -e "${BOLD}Ollama API:${NC} http://$LOCAL_IP:11434"
-    echo -e "${BOLD}Log File:${NC} $(pwd)/$LOG_FILE"
-    echo
-    echo -e "${BOLD}${GREEN}==================================${NC}"
-    echo
-    print_message "AI Development Orchestration System is now running!"() {
+# Define update_progress BEFORE it gets called
+update_progress() {
     CURRENT_STEP=$((CURRENT_STEP + 1))
     progress_bar $TOTAL_STEPS $CURRENT_STEP
 }
@@ -94,6 +393,95 @@ command_exists() {
     else
         return 1
     fi
+}
+
+# Check for required commands
+check_required_commands() {
+    print_status "Checking for required commands..."
+    
+    local missing_commands=()
+    for cmd in curl wget python3; do
+        if ! command_exists "$cmd"; then
+            missing_commands+=("$cmd")
+        fi
+    done
+    
+    if [ ${#missing_commands[@]} -gt 0 ]; then
+        print_error "Required command(s) not found: ${missing_commands[*]}"
+        print_status "Please install the missing commands and try again."
+        print_status "On Debian/Ubuntu systems, you can use: sudo apt-get install ${missing_commands[*]}"
+        exit 1
+    fi
+    
+    # Check for optional but useful commands
+    local optional_commands=("lsof" "netstat" "gunicorn" "systemctl")
+    local missing_optional=()
+    
+    for cmd in "${optional_commands[@]}"; do
+        if ! command_exists "$cmd"; then
+            missing_optional+=("$cmd")
+        fi
+    done
+    
+    if [ ${#missing_optional[@]} -gt 0 ]; then
+        print_warning "Some optional commands are not available: ${missing_optional[*]}"
+        print_status "The script will continue, but some features may be limited."
+    fi
+    
+    print_success "All required commands are available"
+}
+
+# Check if we're in the project root directory
+check_project_directory() {
+    print_status "Checking project directory..."
+    
+    # Check if the current directory has a run.sh file (this script)
+    if [ ! -f "./run.sh" ]; then
+        print_error "This script must be run from the project root directory."
+        print_status "Please cd to the directory containing run.sh and try again."
+        exit 1
+    fi
+    
+    # Check if the directory structure looks right
+    local expected_dirs=("orchestrator" "script-agent" "model_providers" "templates" "static")
+    local missing_dirs=()
+    
+    for dir in "${expected_dirs[@]}"; do
+        if [ ! -d "./$dir" ] && [ ! -f "./$dir" ]; then
+            missing_dirs+=("$dir")
+        fi
+    done
+    
+    if [ ${#missing_dirs[@]} -gt 0 ]; then
+        print_warning "Some expected directories are missing: ${missing_dirs[*]}"
+        print_status "This might indicate you're not in the correct project directory."
+        read -p "Continue anyway? (y/n): " continue_anyway
+        if [[ "$continue_anyway" != "y" && "$continue_anyway" != "Y" ]]; then
+            print_error "Aborted by user"
+            exit 1
+        fi
+    else
+        print_success "Running from project root directory"
+    fi
+}
+
+# Function to display initial banner
+show_banner() {
+    echo -e "${BOLD}${BLUE}"
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                                                               ║"
+    echo "║     AI CODE DEVELOPMENT ORCHESTRATION SYSTEM INSTALLER        ║"
+    echo "║                                                               ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo "This script will set up and configure the AI Development Orchestration System"
+    echo "including all necessary dependencies, Python libraries, and Ollama integration."
+    echo
+    echo -e "Total setup steps: ${CYAN}$TOTAL_STEPS${NC}"
+    echo "Estimated time: 5-10 minutes (depending on your internet connection)"
+    echo
+    echo -e "${YELLOW}Press Enter to continue or Ctrl+C to cancel${NC}"
+    read
 }
 
 # Function to check if running as root
@@ -238,57 +626,103 @@ install_pip() {
 install_ollama() {
     print_status "Setting up Ollama..."
     
-    if ! command_exists ollama; then
-        print_message "Ollama not found. Installing Ollama..."
-        print_status "Downloading and running Ollama installer..."
+    # Check if Ollama is already running
+    local ollama_running=false
+    if command_exists curl; then
+        if curl -s --head --fail http://localhost:11434/api/tags > /dev/null 2>&1; then
+            print_success "Ollama is already running"
+            ollama_running=true
+        fi
+    fi
+    
+    if [ "$ollama_running" = "false" ]; then
+        if ! command_exists ollama; then
+            print_message "Ollama not found. Installing Ollama..."
+            print_status "Downloading and running Ollama installer..."
+            
+            local ollama_installer="${TEMP_DIR}/ollama-install.sh"
+            if curl -fsSL https://ollama.com/install.sh -o "$ollama_installer"; then
+                chmod +x "$ollama_installer"
+                if $USE_SUDO bash "$ollama_installer" > "${TEMP_DIR}/ollama-install.log" 2>&1; then
+                    print_success "Ollama installed"
+                else
+                    print_error "Failed to install Ollama"
+                    print_status "Check the log at ${TEMP_DIR}/ollama-install.log for details"
+                    cat "${TEMP_DIR}/ollama-install.log"
+                    exit 1
+                fi
+            else
+                print_error "Failed to download Ollama installer"
+                exit 1
+            fi
+        else
+            print_success "Ollama is already installed"
+        fi
         
-        if curl -fsSL https://ollama.com/install.sh -o /tmp/ollama-install.sh; then
-            if $USE_SUDO bash /tmp/ollama-install.sh > /tmp/ollama-install.log 2>&1; then
-                print_success "Ollama installed"
+        # Start Ollama service
+        print_status "Starting Ollama service..."
+        if command_exists systemctl; then
+            print_status "Using systemd to start Ollama..."
+            if $USE_SUDO systemctl enable --now ollama > "${TEMP_DIR}/ollama-service.log" 2>&1; then
+                if $USE_SUDO systemctl restart ollama >> "${TEMP_DIR}/ollama-service.log" 2>&1; then
+                    print_success "Ollama service started with systemd"
+                else
+                    print_error "Failed to restart Ollama service"
+                    print_status "Check the log at ${TEMP_DIR}/ollama-service.log for details"
+                    cat "${TEMP_DIR}/ollama-service.log"
+                    exit 1
+                fi
             else
-                print_error "Failed to install Ollama"
-                print_status "Check the log at /tmp/ollama-install.log for details"
-                cat /tmp/ollama-install.log
+                print_error "Failed to enable Ollama service"
+                print_status "Check the log at ${TEMP_DIR}/ollama-service.log for details"
+                cat "${TEMP_DIR}/ollama-service.log"
                 exit 1
             fi
         else
-            print_error "Failed to download Ollama installer"
-            exit 1
-        fi
-    else
-        print_success "Ollama is already installed"
-    fi
-    
-    # Start Ollama service
-    print_status "Starting Ollama service..."
-    if command_exists systemctl; then
-        print_status "Using systemd to start Ollama..."
-        if $USE_SUDO systemctl enable --now ollama > /tmp/ollama-service.log 2>&1; then
-            if $USE_SUDO systemctl restart ollama >> /tmp/ollama-service.log 2>&1; then
-                print_success "Ollama service started with systemd"
-            else
-                print_error "Failed to restart Ollama service"
-                print_status "Check the log at /tmp/ollama-service.log for details"
-                cat /tmp/ollama-service.log
-                exit 1
+            print_status "systemd not found, starting Ollama directly..."
+            if pkill -f "ollama serve" > /dev/null 2>&1; then
+                print_status "Killed existing Ollama process"
             fi
-        else
-            print_error "Failed to enable Ollama service"
-            print_status "Check the log at /tmp/ollama-service.log for details"
-            cat /tmp/ollama-service.log
-            exit 1
+            print_status "Starting Ollama in background..."
+            nohup ollama serve > "${TEMP_DIR}/ollama.log" 2>&1 &
+            OLLAMA_PID=$!
+            print_status "Ollama started with PID: $OLLAMA_PID"
         fi
-    else
-        print_status "systemd not found, starting Ollama directly..."
-        if pkill -f "ollama serve" > /dev/null 2>&1; then
-            print_status "Killed existing Ollama process"
-        fi
-        print_status "Starting Ollama in background..."
-        nohup ollama serve > ollama.log 2>&1 &
-        print_success "Ollama started in background"
+        
+        # Wait for Ollama to start using the dedicated function
+        wait_for_ollama
     fi
     
-    print_message "Waiting for Ollama service to start..."
+    update_progress
+} to initialize
+        print_message "Waiting for Ollama service to start..."
+        local max_attempts=30
+        local attempt=0
+        local ollama_ready=false
+        
+        while [ $attempt -lt $max_attempts ]; do
+            if curl -s --head --fail http://localhost:11434/api/tags > /dev/null 2>&1; then
+                ollama_ready=true
+                break
+            fi
+            
+            attempt=$((attempt + 1))
+            if [ $attempt -lt $max_attempts ]; then
+                echo -ne "Waiting for Ollama to start: ${attempt}/${max_attempts}\r"
+                sleep 1
+            fi
+        done
+        
+        if [ "$ollama_ready" = "true" ]; then
+            print_success "Ollama service is running and responding"
+        else
+            print_warning "Ollama might not be running correctly after $max_attempts attempts."
+            print_status "Will continue anyway, but you may need to start Ollama manually."
+        fi
+    fi
+    
+    update_progress
+} service to start..."
     sleep 5
     
     # Verify Ollama is running
@@ -409,8 +843,16 @@ check_api_keys() {
     if [ ! -f ".env" ]; then
         print_status "Creating .env file..."
         touch .env
+        # Set secure permissions on .env file
+        chmod 600 .env
+        print_status "Set secure permissions on .env file"
     else
         print_status "Found existing .env file"
+        # Ensure .env has secure permissions
+        if [ "$(stat -c %a .env)" != "600" ]; then
+            chmod 600 .env
+            print_status "Updated .env file permissions to be secure"
+        fi
     fi
     
     # Source .env file if it exists
@@ -424,6 +866,10 @@ check_api_keys() {
         print_warning "ANTHROPIC_API_KEY environment variable is not set."
         read -p "Enter your Anthropic API key (or leave blank to skip): " api_key
         if [ ! -z "$api_key" ]; then
+            # Basic validation - API keys are usually at least 20 chars
+            if [ ${#api_key} -lt 20 ]; then
+                print_warning "The API key seems too short. Please verify it's correct."
+            fi
             echo "ANTHROPIC_API_KEY=$api_key" >> .env
             export ANTHROPIC_API_KEY="$api_key"
             print_success "Anthropic API key saved to .env file"
@@ -439,6 +885,10 @@ check_api_keys() {
         print_warning "OPENAI_API_KEY environment variable is not set."
         read -p "Enter your OpenAI API key (or leave blank to skip): " api_key
         if [ ! -z "$api_key" ]; then
+            # Basic validation - OpenAI keys start with "sk-"
+            if [[ ! "$api_key" =~ ^sk- ]]; then
+                print_warning "The API key doesn't start with 'sk-'. Please verify it's correct."
+            fi
             echo "OPENAI_API_KEY=$api_key" >> .env
             export OPENAI_API_KEY="$api_key"
             print_success "OpenAI API key saved to .env file"
@@ -454,6 +904,10 @@ check_api_keys() {
         print_warning "DEEPSEEK_API_KEY environment variable is not set."
         read -p "Enter your DeepSeek API key (or leave blank to skip): " api_key
         if [ ! -z "$api_key" ]; then
+            # Basic validation
+            if [ ${#api_key} -lt 20 ]; then
+                print_warning "The API key seems too short. Please verify it's correct."
+            fi
             echo "DEEPSEEK_API_KEY=$api_key" >> .env
             export DEEPSEEK_API_KEY="$api_key"
             print_success "DeepSeek API key saved to .env file"
@@ -536,7 +990,7 @@ create_ollama_provider() {
         print_message "Creating Ollama provider module..."
         mkdir -p model_providers
         
-        cat > model_providers/ollama_provider.py << 'EOFPROVIDER'
+        cat > model_providers/ollama_provider.py << 'EOF_PROVIDER'
 """
 Ollama Provider
 Implementation for Ollama local models
@@ -676,7 +1130,7 @@ class OllamaProvider(BaseModelProvider):
         """
         # Ollama doesn't have a public tokenizer endpoint, so use rough estimate
         return len(text.split()) * 1.3  # Rough estimate based on typical tokenization
-EOFPROVIDER
+EOF_PROVIDER
         
         print_success "Created model_providers/ollama_provider.py"
     else
@@ -688,7 +1142,7 @@ EOFPROVIDER
         # Create the __init__.py file with Ollama support
         print_status "Creating model_providers/__init__.py with Ollama support..."
         
-        cat > model_providers/__init__.py << 'EOFMINIT'
+        cat > model_providers/__init__.py << 'EOF_INIT'
 """
 Model Providers Module
 Factory for getting appropriate model providers
@@ -761,7 +1215,7 @@ def get_provider(provider_name: str) -> Optional[Any]:
     except (ImportError, AttributeError) as e:
         print(f"Error initializing provider {provider_name}: {e}")
         return None
-EOFMINIT
+EOF_INIT
         
         print_success "Created model_providers/__init__.py with Ollama support"
     elif ! grep -q "ollama" "model_providers/__init__.py"; then
@@ -770,14 +1224,10 @@ EOFMINIT
         cp model_providers/__init__.py model_providers/__init__.py.bak
         print_status "Backed up original __init__.py file"
         
-        # Update the provider mapping to include Ollama
-        sed -i 's/PROVIDERS = {/PROVIDERS = {\n    \'ollama\': \'model_providers.ollama_provider\',/g' model_providers/__init__.py
-        
-        # Update the api_key_env_vars dictionary
-        sed -i 's/api_key_env_vars = {/api_key_env_vars = {\n        \'ollama\': \'OLLAMA_API_URL\',/g' model_providers/__init__.py
-        
-        # Update the provider_classes dictionary
-        sed -i 's/provider_classes = {/provider_classes = {\n            \'ollama\': \'OllamaProvider\',/g' model_providers/__init__.py
+        # Use alternate delimiter for sed to avoid problems with quotes
+        sed -i 's/PROVIDERS = {/PROVIDERS = {\n    "ollama": "model_providers.ollama_provider",/g' model_providers/__init__.py
+        sed -i 's/api_key_env_vars = {/api_key_env_vars = {\n        "ollama": "OLLAMA_API_URL",/g' model_providers/__init__.py
+        sed -i 's/provider_classes = {/provider_classes = {\n            "ollama": "OllamaProvider",/g' model_providers/__init__.py
         
         print_success "Updated model_providers/__init__.py to include Ollama"
     else
@@ -791,23 +1241,62 @@ EOFMINIT
 setup_models() {
     print_status "Setting up base models in Ollama..."
     
-    # Check if Ollama is running
-    if ! curl -s --head http://localhost:11434/api/tags > /dev/null; then
-        print_warning "Ollama is not running, skipping model downloads"
+    # Check if Ollama is running, and wait for it if needed
+    if ! curl -s --head --fail http://localhost:11434/api/tags > /dev/null 2>&1; then
+        print_status "Waiting for Ollama to be ready before downloading models..."
+        if ! wait_for_ollama; then
+            print_warning "Ollama is not running, skipping model downloads"
+            update_progress
+            return
+        fi
+    fi
+    
+    # Check what models are already available
+    local available_models
+    available_models=$(curl -s http://localhost:11434/api/tags 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d':' -f2 | tr -d '"' | sort || echo "")
+    
+    if echo "$available_models" | grep -q "llama3"; then
+        print_success "llama3 model is already downloaded"
         update_progress
         return
     fi
     
-    # Try to download llama3 model (or whatever is available)
+    # Try to download llama3 or another suitable model
     print_message "Downloading base model (llama3)..."
     print_status "This may take a while depending on your internet connection"
     
-    if ollama pull llama3 > /tmp/ollama-pull.log 2>&1; then
+    # Show a spinner while downloading
+    local spin='-\|/'
+    local i=0
+    
+    # Start downloading in background
+    ollama pull llama3 > "${TEMP_DIR}/ollama-pull.log" 2>&1 &
+    local pull_pid=$!
+    
+    # Display a spinner while download is in progress
+    while kill -0 $pull_pid 2>/dev/null; do
+        i=$(( (i+1) % 4 ))
+        printf "\r${CYAN}Downloading model... ${spin:$i:1} ${NC}"
+        sleep 0.5
+    done
+    
+    # Check if the download was successful
+    if wait $pull_pid; then
+        printf "\r${GREEN}Download complete!     ${NC}\n"
         print_success "Successfully pulled llama3 model"
     else
+        printf "\r${RED}Download failed!      ${NC}\n"
         print_warning "Failed to pull llama3 model"
         print_status "You can manually download models later with 'ollama pull <model>'"
-        print_status "Check the log at /tmp/ollama-pull.log for details"
+        print_status "Check the log at ${TEMP_DIR}/ollama-pull.log for details"
+        
+        # Try to pull a smaller model as fallback
+        print_status "Trying to pull a smaller model (phi) as fallback..."
+        if ollama pull phi > "${TEMP_DIR}/ollama-pull-phi.log" 2>&1; then
+            print_success "Successfully pulled phi model (lightweight alternative)"
+        else
+            print_warning "Failed to pull any models. You'll need to pull them manually."
+        fi
     fi
     
     update_progress
@@ -843,57 +1332,3 @@ verify_config() {
     
     update_progress
 }
-
-# Start the Flask application
-start_flask() {
-    print_status "Preparing to start Flask application..."
-    
-    # Create logs directory if it doesn't exist
-    mkdir -p logs
-    
-    # Activate virtual environment if not already activated
-    if [ -z "$VIRTUAL_ENV" ]; then
-        print_status "Activating virtual environment..."
-        source venv/bin/activate
-    fi
-    
-    # Set Flask environment variables
-    export FLASK_APP=app.py
-    print_status "Set FLASK_APP=app.py"
-    
-    # Create a more descriptive log file name with timestamp
-    LOG_FILE="logs/flask_$(date +%Y%m%d_%H%M%S).log"
-    print_status "Logs will be written to: $LOG_FILE"
-    
-    # Start Flask in background
-    print_message "Starting Flask application on http://0.0.0.0:9000"
-    if command_exists gunicorn; then
-        print_status "Using gunicorn for production-ready server..."
-        nohup gunicorn -b 0.0.0.0:9000 -w 4 app:app > "$LOG_FILE" 2>&1 &
-        FLASK_PID=$!
-    else
-        print_status "Using Flask development server (consider installing gunicorn for production)..."
-        nohup flask run --host=0.0.0.0 --port=9000 > "$LOG_FILE" 2>&1 &
-        FLASK_PID=$!
-    fi
-    
-    # Wait a moment for the server to start
-    sleep 3
-    
-    # Check if the process is still running
-    if ps -p $FLASK_PID > /dev/null; then
-        print_success "Application started in background with PID: $FLASK_PID"
-    else
-        print_error "Flask application failed to start"
-        print_status "Check the log at $LOG_FILE for details"
-        cat "$LOG_FILE"
-        exit 1
-    fi
-    
-    # Try to get the local IP address for user convenience
-    LOCAL_IP=$(hostname -I | awk '{print $1}')
-    if [ -z "$LOCAL_IP" ]; then
-        LOCAL_IP="localhost"
-    fi
-    
-    update_progress
