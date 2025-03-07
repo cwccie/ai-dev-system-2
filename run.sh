@@ -1,279 +1,5 @@
-# Wait for Ollama to be ready
-wait_for_ollama() {
-    print_message "Waiting for Ollama service to start..."
-    local max_attempts=30
-    local attempt=0
-    local ollama_ready=false
-    
-    while [ $attempt -lt $max_attempts ]; do
-        if curl -s --head --fail http://localhost:11434/api/tags > /dev/null 2>&1; then
-            ollama_ready=true
-            break
-        fi
-        
-        attempt=$((attempt + 1))
-        if [ $attempt -lt $max_attempts ]; then
-            echo -ne "Waiting for Ollama to start: ${attempt}/${max_attempts}\r"
-            sleep 1
-        fi
-    done
-    
-    if [ "$ollama_ready" = "true" ]; then
-        print_success "Ollama service is running and responding"
-        return 0
-    else
-        print_warning "Ollama might not be running correctly after $max_attempts attempts."
-        print_status "Will continue anyway, but you may need to start Ollama manually."
-        return 1
-    fi
-}# Start the Flask application
-start_flask() {
-    print_status "Preparing to start Flask application..."
-    
-    # Create logs directory if it doesn't exist
-    mkdir -p logs
-    
-    # Activate virtual environment if not already activated
-    if [ -z "$VIRTUAL_ENV" ]; then
-        print_status "Activating virtual environment..."
-        source venv/bin/activate
-    fi
-    
-    # Set Flask environment variables
-    export FLASK_APP=app.py
-    print_status "Set FLASK_APP=app.py"
-    
-    # Create a more descriptive log file name with timestamp
-    LOG_FILE="logs/flask_$(date +%Y%m%d_%H%M%S).log"
-    print_status "Logs will be written to: $LOG_FILE"
-    
-    # Check if port 9000 is already in use
-    if command_exists lsof; then
-        PORT_PID=$(lsof -ti:9000 2>/dev/null)
-        if [ ! -z "$PORT_PID" ]; then
-            print_warning "Port 9000 is already in use by process $PORT_PID"
-            read -p "Do you want to stop the existing process and continue? (y/n): " stop_process
-            if [[ "$stop_process" == "y" || "$stop_process" == "Y" ]]; then
-                print_status "Stopping process $PORT_PID..."
-                kill -9 $PORT_PID 2>/dev/null || $USE_SUDO kill -9 $PORT_PID
-                sleep 2  # Give the system time to free the port
-            else
-                print_error "Port 9000 is already in use. Please stop the existing process or use a different port."
-                exit 1
-            fi
-        fi
-    elif command_exists netstat; then
-        if netstat -tuln | grep -q ":9000 "; then
-            print_warning "Port 9000 is already in use"
-            read -p "Do you want to continue anyway? (y/n): " continue_anyway
-            if [[ "$continue_anyway" != "y" && "$continue_anyway" != "Y" ]]; then
-                print_error "Aborted by user"
-                exit 1
-            fi
-        fi
-    fi
-    
-    # Start Flask in background
-    print_message "Starting Flask application on http://0.0.0.0:9000"
-    if command_exists gunicorn; then
-        print_status "Using gunicorn for production-ready server..."
-        nohup gunicorn -b 0.0.0.0:9000 -w 4 --access-logfile logs/access.log --error-logfile logs/error.log app:app > "$LOG_FILE" 2>&1 &
-        FLASK_PID=$!
-    else
-        print_status "Using Flask development server (consider installing gunicorn for production)..."
-        nohup flask run --host=0.0.0.0 --port=9000 > "$LOG_FILE" 2>&1 &
-        FLASK_PID=$!
-    fi
-    
-    # Wait a moment for the server to start
-    print_status "Waiting for server to start..."
-    sleep 3
-    
-    # Check if the process is still running
-    if ps -p $FLASK_PID > /dev/null; then
-        print_success "Application started in background with PID: $FLASK_PID"
-        
-        # Verify server is responding
-        if command_exists curl; then
-            if curl -s --head --fail http://localhost:9000 > /dev/null; then
-                print_success "Server is responding to requests"
-            else
-                print_warning "Server is running but not responding yet. It may need more time to initialize."
-            fi
-        fi
-    else
-        print_error "Flask application failed to start"
-        print_status "Check the log at $LOG_FILE for details"
-        cat "$LOG_FILE"
-        exit 1
-    fi
-    
-    # Try to get the local IP address for user convenience
-    LOCAL_IP=$(hostname -I | awk '{print $1}')
-    if [ -z "$LOCAL_IP" ]; then
-        LOCAL_IP="localhost"
-    fi
-    
-    update_progress
-    
-    # Print summary information
-    echo
-    echo -e "${BOLD}${GREEN}====== Application Summary ======${NC}"
-    echo -e "${BOLD}Flask Web Interface:${NC} http://$LOCAL_IP:9000"
-    echo -e "${BOLD}Ollama API:${NC} http://$LOCAL_IP:11434"
-    echo -e "${BOLD}Log File:${NC} $(pwd)/$LOG_FILE"
-    echo -e "${BOLD}Process ID:${NC} $FLASK_PID (use 'kill $FLASK_PID' to stop)"
-    echo
-    echo -e "${BOLD}${GREEN}==================================${NC}"
-    echo
-    print_message "AI Development Orchestration System is now running!"
-}
-
-# Main function
-main() {
-    show_banner
-    
-    # Start timestamp
-    START_TIME=$(date +%s)
-    
-    # Print starting message with timestamp
-    print_message "Starting AI Code Development Orchestration System setup at $(date)"
-    
-    # Check project directory and required commands
-    check_project_directory
-    check_required_commands
-    
-    # Check if running as root and detect OS
-    check_root
-    detect_os
-    
-    # Update and install system packages
-    if [ "$SKIP_SYSTEM" = "false" ]; then
-        print_message "Preparing system..."
-        update_system
-        install_python
-        install_pip
-    else
-        print_message "Skipping system updates as requested."
-        # Skip progress steps
-        update_progress
-        update_progress
-        update_progress
-    fi
-    
-    # Install and configure Ollama
-    if [ "$SKIP_OLLAMA" = "false" ]; then
-        print_message "Setting up Ollama..."
-        install_ollama
-    else
-        print_message "Skipping Ollama installation as requested."
-        update_progress
-    fi
-    
-    # Set up the Python environment
-    print_message "Setting up Python environment..."
-    setup_venv
-    install_dependencies
-    check_api_keys
-    create_directories
-    create_ollama_provider
-    
-    # Set up models
-    if [ "$SKIP_OLLAMA" = "false" ]; then
-        setup_models
-    else
-        print_message "Skipping model downloads as Ollama is skipped."
-        update_progress
-    fi
-    
-    # Verify configuration
-    verify_config
-    
-    # Start the Flask application
-    print_message "Starting Flask application..."
-    start_flask
-    
-    # Calculate and display total execution time
-    END_TIME=$(date +%s)
-    TOTAL_TIME=$((END_TIME - START_TIME))
-    MINUTES=$((TOTAL_TIME / 60))
-    SECONDS=$((TOTAL_TIME % 60))
-    
-    print_success "Setup completed in ${MINUTES}m ${SECONDS}s"
-}
-
-# Enable debug mode with environment variable 
-# DEBUG=true ./run.sh
-if [ "$DEBUG" = "true" ]; then
-    print_warning "Debug mode enabled"
-    # Print environment information
-    print_debug "Bash version: $BASH_VERSION"
-    print_debug "OS details: $(uname -a)"
-    print_debug "Current working directory: $(pwd)"
-    set -x  # Print each command before executing
-fi
-
-# Check if a help flag is provided
-if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
-    echo -e "${BOLD}${BLUE}AI Development Orchestration System Setup Script${NC}"
-    echo
-    echo "Usage: ./run.sh [OPTIONS]"
-    echo
-    echo "Options:"
-    echo "  --help, -h     Show this help message"
-    echo "  --debug        Enable debug output"
-    echo "  --skip-system  Skip system updates and tool installation"
-    echo "  --skip-ollama  Skip Ollama installation"
-    echo
-    echo "Environment variables:"
-    echo "  DEBUG=true     Enable debug mode"
-    echo
-    exit 0
-fi
-
-# Handle command line arguments
-SKIP_SYSTEM=false
-SKIP_OLLAMA=false
-
-for arg in "$@"; do
-    case $arg in
-        --debug)
-            DEBUG=true
-            print_warning "Debug mode enabled"
-            ;;
-        --skip-system)
-            SKIP_SYSTEM=true
-            print_warning "Skipping system updates and tool installation"
-            ;;
-        --skip-ollama)
-            SKIP_OLLAMA=true
-            print_warning "Skipping Ollama installation"
-            ;;
-        *)
-            # Unknown option
-            print_warning "Unknown option: $arg"
-            ;;
-    esac
-done
-
-# Run the main function - make sure we're in a clean environment
-unset PYTHONPATH
-export LC_ALL=C.UTF-8
-export LANG=C.UTF-8
-
-# Set default value for debug mode
-[ -z "$DEBUG" ] && DEBUG=false
-
-# Check if the script is being sourced or executed
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    # Script is being executed
-    main
-else
-    # Script is being sourced
-    print_warning "This script is meant to be executed, not sourced."
-    print_message "Run it with: ./run.sh [OPTIONS]"
-fi#!/bin/bash
-
+#!/bin/bash
+#
 # AI Code Development Orchestration System
 # Enhanced runner script to set up environment, install dependencies, and run Flask application
 
@@ -326,8 +52,35 @@ NC='\033[0m' # No Color
 TOTAL_STEPS=12
 CURRENT_STEP=0
 
-# Define all helper functions first
-# Function to print colored messages
+# Simple progress bar implementation
+progress_bar() {
+    local total=$1
+    local current=$2
+    local width=50
+    local percentage=$((current * 100 / total))
+    local completed=$((width * current / total))
+    local remaining=$((width - completed))
+    
+    local bar="["
+    for ((i=0; i<completed; i++)); do
+        bar+="#"
+    done
+    for ((i=0; i<remaining; i++)); do
+        bar+="."
+    done
+    bar+="] $percentage%"
+    
+    echo -ne "${CYAN}$bar${NC}\r"
+    if [ $current -eq $total ]; then
+        echo
+    fi
+}
+
+update_progress() {
+    CURRENT_STEP=$((CURRENT_STEP + 1))
+    progress_bar $TOTAL_STEPS $CURRENT_STEP
+}
+
 print_message() {
     echo -e "${BLUE}[AI-Dev-Orchestrator]${NC} $1"
 }
@@ -354,39 +107,6 @@ print_debug() {
     fi
 }
 
-# Simple progress bar implementation
-progress_bar() {
-    local total=$1
-    local current=$2
-    local width=50
-    local percentage=$((current * 100 / total))
-    local completed=$((width * current / total))
-    local remaining=$((width - completed))
-    
-    # Build the progress bar
-    local bar="["
-    for ((i=0; i<completed; i++)); do
-        bar+="#"
-    done
-    for ((i=0; i<remaining; i++)); do
-        bar+="."
-    done
-    bar+="] $percentage%"
-    
-    # Print the progress bar
-    echo -ne "${CYAN}$bar${NC}\r"
-    if [ $current -eq $total ]; then
-        echo
-    fi
-}
-
-# Define update_progress BEFORE it gets called
-update_progress() {
-    CURRENT_STEP=$((CURRENT_STEP + 1))
-    progress_bar $TOTAL_STEPS $CURRENT_STEP
-}
-
-# Function to check if a command exists
 command_exists() {
     if command -v "$1" >/dev/null 2>&1; then
         return 0
@@ -413,10 +133,8 @@ check_required_commands() {
         exit 1
     fi
     
-    # Check for optional but useful commands
     local optional_commands=("lsof" "netstat" "gunicorn" "systemctl")
     local missing_optional=()
-    
     for cmd in "${optional_commands[@]}"; do
         if ! command_exists "$cmd"; then
             missing_optional+=("$cmd")
@@ -434,18 +152,14 @@ check_required_commands() {
 # Check if we're in the project root directory
 check_project_directory() {
     print_status "Checking project directory..."
-    
-    # Check if the current directory has a run.sh file (this script)
     if [ ! -f "./run.sh" ]; then
         print_error "This script must be run from the project root directory."
         print_status "Please cd to the directory containing run.sh and try again."
         exit 1
     fi
     
-    # Check if the directory structure looks right
     local expected_dirs=("orchestrator" "script-agent" "model_providers" "templates" "static")
     local missing_dirs=()
-    
     for dir in "${expected_dirs[@]}"; do
         if [ ! -d "./$dir" ] && [ ! -f "./$dir" ]; then
             missing_dirs+=("$dir")
@@ -465,7 +179,6 @@ check_project_directory() {
     fi
 }
 
-# Function to display initial banner
 show_banner() {
     echo -e "${BOLD}${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════════╗"
@@ -484,7 +197,6 @@ show_banner() {
     read
 }
 
-# Function to check if running as root
 check_root() {
     print_status "Checking execution privileges..."
     if [ "$EUID" -ne 0 ]; then
@@ -498,7 +210,6 @@ check_root() {
     update_progress
 }
 
-# Function to detect the OS
 detect_os() {
     print_status "Detecting operating system..."
     if [ -f /etc/os-release ]; then
@@ -513,7 +224,6 @@ detect_os() {
     update_progress
 }
 
-# Update and upgrade the system
 update_system() {
     print_status "Starting system update process..."
     
@@ -553,7 +263,6 @@ update_system() {
     update_progress
 }
 
-# Install Python 3 if not already installed
 install_python() {
     print_status "Checking Python installation..."
     if ! command_exists python3; then
@@ -570,11 +279,9 @@ install_python() {
         print_success "Python 3 is already installed"
     fi
     
-    # Check Python version
     python_version=$(python3 --version | cut -d' ' -f2)
     print_status "Found Python version: $python_version"
     
-    # Make sure python3-venv is installed
     print_status "Checking for python3-venv package..."
     if ! $USE_SUDO dpkg -l | grep -q python3-venv; then
         print_message "Installing python3-venv package..."
@@ -593,7 +300,6 @@ install_python() {
     update_progress
 }
 
-# Install pip if not already installed
 install_pip() {
     print_status "Checking pip installation..."
     if ! command_exists pip3; then
@@ -615,18 +321,44 @@ install_pip() {
         else
             print_warning "Failed to upgrade pip"
             print_status "Check the log at /tmp/pip-upgrade.log for details"
-            # This is just a warning, not fatal
         fi
     fi
     
     update_progress
 }
 
-# Install Ollama
+wait_for_ollama() {
+    print_message "Waiting for Ollama service to start..."
+    local max_attempts=30
+    local attempt=0
+    local ollama_ready=false
+    
+    while [ $attempt -lt $max_attempts ]; do
+        if curl -s --head --fail http://localhost:11434/api/tags > /dev/null 2>&1; then
+            ollama_ready=true
+            break
+        fi
+        
+        attempt=$((attempt + 1))
+        if [ $attempt -lt $max_attempts ]; then
+            echo -ne "Waiting for Ollama to start: ${attempt}/${max_attempts}\r"
+            sleep 1
+        fi
+    done
+    
+    if [ "$ollama_ready" = "true" ]; then
+        print_success "Ollama service is running and responding"
+        return 0
+    else
+        print_warning "Ollama might not be running correctly after $max_attempts attempts."
+        print_status "Will continue anyway, but you may need to start Ollama manually."
+        return 1
+    fi
+}
+
 install_ollama() {
     print_status "Setting up Ollama..."
     
-    # Check if Ollama is already running
     local ollama_running=false
     if command_exists curl; then
         if curl -s --head --fail http://localhost:11434/api/tags > /dev/null 2>&1; then
@@ -659,7 +391,6 @@ install_ollama() {
             print_success "Ollama is already installed"
         fi
         
-        # Start Ollama service
         print_status "Starting Ollama service..."
         if command_exists systemctl; then
             print_status "Using systemd to start Ollama..."
@@ -689,40 +420,10 @@ install_ollama() {
             print_status "Ollama started with PID: $OLLAMA_PID"
         fi
         
-        # Wait for Ollama to start using the dedicated function
         wait_for_ollama
     fi
     
     update_progress
-
-        print_message "Waiting for Ollama service to start..."
-        local max_attempts=30
-        local attempt=0
-        local ollama_ready=false
-        
-        while [ $attempt -lt $max_attempts ]; do
-            if curl -s --head --fail http://localhost:11434/api/tags > /dev/null 2>&1; then
-                ollama_ready=true
-                break
-            fi
-            
-            attempt=$((attempt + 1))
-            if [ $attempt -lt $max_attempts ]; then
-                echo -ne "Waiting for Ollama to start: ${attempt}/${max_attempts}\r"
-                sleep 1
-            fi
-        done
-        
-        if [ "$ollama_ready" = "true" ]; then
-            print_success "Ollama service is running and responding"
-        else
-            print_warning "Ollama might not be running correctly after $max_attempts attempts."
-            print_status "Will continue anyway, but you may need to start Ollama manually."
-        fi
-    fi
-    
-    update_progress
-
     sleep 5
     
     # Verify Ollama is running
@@ -736,7 +437,6 @@ install_ollama() {
     update_progress
 }
 
-# Check if virtual environment exists, create if not
 setup_venv() {
     print_status "Setting up Python virtual environment..."
     if [ ! -d "venv" ]; then
@@ -753,7 +453,6 @@ setup_venv() {
         print_success "Virtual environment already exists"
     fi
     
-    # Activate virtual environment
     print_status "Activating virtual environment..."
     if source venv/bin/activate; then
         print_success "Virtual environment activated"
@@ -767,25 +466,19 @@ setup_venv() {
     update_progress
 }
 
-# Install required dependencies
 install_dependencies() {
     print_status "Installing Python dependencies..."
-    
-    # Upgrade pip first
     print_message "Upgrading pip in virtual environment..."
     if pip3 install --upgrade pip > /tmp/venv-pip-upgrade.log 2>&1; then
         print_success "pip upgraded in virtual environment"
     else
         print_warning "Failed to upgrade pip in virtual environment"
         print_status "Check the log at /tmp/venv-pip-upgrade.log for details"
-        # This is just a warning, not fatal
     fi
     
-    # Install Flask and other main dependencies
     print_message "Installing main dependencies..."
     main_deps="flask flask-login anthropic>=0.5.0 tqdm>=4.65.0 python-dotenv aiohttp openai"
     print_status "Dependencies to install: $main_deps"
-    
     if pip3 install $main_deps > /tmp/main-deps-install.log 2>&1; then
         print_success "Main dependencies installed"
     else
@@ -795,17 +488,14 @@ install_dependencies() {
         exit 1
     fi
     
-    # Install additional dependencies
     print_message "Installing additional dependencies..."
     if pip3 install flask-cors gunicorn flask-wtf > /tmp/add-deps-install.log 2>&1; then
         print_success "Additional dependencies installed"
     else
         print_warning "Failed to install additional dependencies"
         print_status "Check the log at /tmp/add-deps-install.log for details"
-        # This is not fatal
     fi
     
-    # Install component-specific dependencies
     if [ -f "orchestrator/requirements.txt" ]; then
         print_message "Installing orchestrator dependencies..."
         if pip3 install -r orchestrator/requirements.txt > /tmp/orchestrator-deps.log 2>&1; then
@@ -813,7 +503,6 @@ install_dependencies() {
         else
             print_warning "Failed to install orchestrator dependencies"
             print_status "Check the log at /tmp/orchestrator-deps.log for details"
-            # This is not fatal
         fi
     else
         print_status "No orchestrator/requirements.txt found, skipping"
@@ -826,7 +515,6 @@ install_dependencies() {
         else
             print_warning "Failed to install script-agent dependencies"
             print_status "Check the log at /tmp/script-agent-deps.log for details"
-            # This is not fatal
         fi
     else
         print_status "No script-agent/requirements.txt found, skipping"
@@ -835,38 +523,30 @@ install_dependencies() {
     update_progress
 }
 
-# Check for API keys
 check_api_keys() {
     print_status "Managing API keys..."
-    
-    # Check if .env file exists, create if not
     if [ ! -f ".env" ]; then
         print_status "Creating .env file..."
         touch .env
-        # Set secure permissions on .env file
         chmod 600 .env
         print_status "Set secure permissions on .env file"
     else
         print_status "Found existing .env file"
-        # Ensure .env has secure permissions
         if [ "$(stat -c %a .env)" != "600" ]; then
             chmod 600 .env
             print_status "Updated .env file permissions to be secure"
         fi
     fi
     
-    # Source .env file if it exists
     if [ -f ".env" ]; then
         print_status "Loading environment variables from .env file..."
         source .env
     fi
     
-    # Check for Anthropic API key
     if [ -z "$ANTHROPIC_API_KEY" ]; then
         print_warning "ANTHROPIC_API_KEY environment variable is not set."
         read -p "Enter your Anthropic API key (or leave blank to skip): " api_key
         if [ ! -z "$api_key" ]; then
-            # Basic validation - API keys are usually at least 20 chars
             if [ ${#api_key} -lt 20 ]; then
                 print_warning "The API key seems too short. Please verify it's correct."
             fi
@@ -880,12 +560,10 @@ check_api_keys() {
         print_success "Anthropic API key detected"
     fi
     
-    # Check for OpenAI API key
     if [ -z "$OPENAI_API_KEY" ]; then
         print_warning "OPENAI_API_KEY environment variable is not set."
         read -p "Enter your OpenAI API key (or leave blank to skip): " api_key
         if [ ! -z "$api_key" ]; then
-            # Basic validation - OpenAI keys start with "sk-"
             if [[ ! "$api_key" =~ ^sk- ]]; then
                 print_warning "The API key doesn't start with 'sk-'. Please verify it's correct."
             fi
@@ -899,12 +577,10 @@ check_api_keys() {
         print_success "OpenAI API key detected"
     fi
     
-    # Check for DeepSeek API key
     if [ -z "$DEEPSEEK_API_KEY" ]; then
         print_warning "DEEPSEEK_API_KEY environment variable is not set."
         read -p "Enter your DeepSeek API key (or leave blank to skip): " api_key
         if [ ! -z "$api_key" ]; then
-            # Basic validation
             if [ ${#api_key} -lt 20 ]; then
                 print_warning "The API key seems too short. Please verify it's correct."
             fi
@@ -918,7 +594,6 @@ check_api_keys() {
         print_success "DeepSeek API key detected"
     fi
     
-    # Set Ollama API URL
     if [ -z "$OLLAMA_API_URL" ]; then
         print_message "Setting Ollama API URL..."
         echo "OLLAMA_API_URL=http://localhost:11434" >> .env
@@ -931,11 +606,8 @@ check_api_keys() {
     update_progress
 }
 
-# Create necessary directories if they don't exist
 create_directories() {
     print_status "Creating directory structure..."
-    
-    # Create all required directories
     mkdir -p orchestrator/config
     print_status "Created orchestrator/config/"
     
@@ -957,9 +629,7 @@ create_directories() {
     mkdir -p logs
     print_status "Created logs/"
     
-    # Set proper permissions for execution
     print_status "Setting executable permissions on scripts..."
-    
     chmod +x run.sh
     print_status "Made run.sh executable"
     
@@ -981,11 +651,9 @@ create_directories() {
     update_progress
 }
 
-# Create Ollama provider module
 create_ollama_provider() {
     print_status "Setting up Ollama provider module..."
     
-    # Create ollama_provider.py
     if [ ! -f "model_providers/ollama_provider.py" ]; then
         print_message "Creating Ollama provider module..."
         mkdir -p model_providers
@@ -1039,7 +707,6 @@ class OllamaProvider(BaseModelProvider):
             String containing Ollama's response
         """
         try:
-            # Prepare the request payload
             payload = {
                 "model": self.model,
                 "prompt": prompt,
@@ -1048,7 +715,6 @@ class OllamaProvider(BaseModelProvider):
                 "stream": False
             }
             
-            # Add system prompt if provided
             if system_prompt:
                 payload["system"] = system_prompt
             
@@ -1060,7 +726,6 @@ class OllamaProvider(BaseModelProvider):
                     
                     result = await response.json()
                     return result.get("response", "")
-            
         except Exception as e:
             print(f"Error generating response from Ollama: {e}")
             return f"Error: {str(e)}"
@@ -1075,13 +740,10 @@ class OllamaProvider(BaseModelProvider):
         Returns:
             List of extracted code blocks
         """
-        # Pattern to match code blocks with or without language specification
         pattern = r'```(?:\w+\n)?(.*?)```'
         matches = re.findall(pattern, response, re.DOTALL)
         
-        # If no matches found, check if the entire response might be code
         if not matches and not response.startswith('```') and not response.endswith('```'):
-            # Heuristic: If response has multiple lines and looks like code
             lines = response.split('\n')
             if len(lines) > 1 and any(line.strip().startswith(('def ', 'class ', 'import ', 'from ')) for line in lines):
                 return [response]
@@ -1089,21 +751,12 @@ class OllamaProvider(BaseModelProvider):
         return matches
     
     def get_model_name(self) -> str:
-        """Get the name of the currently used Ollama model"""
         return self.model
     
     def get_provider_name(self) -> str:
-        """Get the provider name"""
         return "ollama"
     
     def get_context_window(self) -> int:
-        """
-        Get Ollama's context window size in tokens
-        
-        Returns:
-            Integer representing the context window size
-        """
-        # Context window sizes for different Ollama models
         context_windows = {
             "llama3": 8192,
             "llama2": 4096,
@@ -1112,24 +765,11 @@ class OllamaProvider(BaseModelProvider):
             "mixtral": 32768,
             "phi3": 8192
         }
-        
-        # Try to extract base model from model name (e.g., "llama3:latest" -> "llama3")
         base_model = self.model.split(':')[0].lower()
-        
-        return context_windows.get(base_model, 4096)  # Default to 4K if unknown
+        return context_windows.get(base_model, 4096)
     
     def count_tokens(self, text: str) -> int:
-        """
-        Count the number of tokens in a text
-        
-        Args:
-            text: The text to count tokens for
-            
-        Returns:
-            Integer representing the token count
-        """
-        # Ollama doesn't have a public tokenizer endpoint, so use rough estimate
-        return len(text.split()) * 1.3  # Rough estimate based on typical tokenization
+        return len(text.split()) * 1.3
 EOF_PROVIDER
         
         print_success "Created model_providers/ollama_provider.py"
@@ -1137,9 +777,7 @@ EOF_PROVIDER
         print_status "Ollama provider module already exists"
     fi
     
-    # Update __init__.py to include Ollama provider
     if [ ! -f "model_providers/__init__.py" ]; then
-        # Create the __init__.py file with Ollama support
         print_status "Creating model_providers/__init__.py with Ollama support..."
         
         cat > model_providers/__init__.py << 'EOF_INIT'
@@ -1152,7 +790,6 @@ import os
 import importlib
 from typing import Optional, Any
 
-# Define provider mapping
 PROVIDERS = {
     'ollama': 'model_providers.ollama_provider',
     'claude': 'model_providers.claude_provider',
@@ -1161,19 +798,9 @@ PROVIDERS = {
 }
 
 def get_provider(provider_name: str) -> Optional[Any]:
-    """
-    Factory function to get the appropriate model provider
-    
-    Args:
-        provider_name: Name of the provider to instantiate
-    
-    Returns:
-        An instance of the requested provider or None if not available
-    """
     if provider_name not in PROVIDERS:
         raise ValueError(f"Unknown provider: {provider_name}")
     
-    # Check for API key
     api_key_env_vars = {
         'ollama': 'OLLAMA_API_URL',
         'claude': 'ANTHROPIC_API_KEY',
@@ -1183,7 +810,6 @@ def get_provider(provider_name: str) -> Optional[Any]:
     
     api_key = os.environ.get(api_key_env_vars.get(provider_name))
     
-    # Special case for Ollama - use default URL if not set
     if provider_name == 'ollama' and not api_key:
         api_key = "http://localhost:11434"
     
@@ -1192,11 +818,9 @@ def get_provider(provider_name: str) -> Optional[Any]:
         return None
     
     try:
-        # Import the module dynamically
         module_path = PROVIDERS[provider_name]
         module = importlib.import_module(module_path)
         
-        # Get the provider class
         provider_classes = {
             'ollama': 'OllamaProvider',
             'claude': 'ClaudeProvider',
@@ -1206,7 +830,6 @@ def get_provider(provider_name: str) -> Optional[Any]:
         
         provider_class = getattr(module, provider_classes[provider_name])
         
-        # Instantiate the provider
         if provider_name == 'ollama':
             return provider_class(api_url=api_key)
         else:
@@ -1219,12 +842,9 @@ EOF_INIT
         
         print_success "Created model_providers/__init__.py with Ollama support"
     elif ! grep -q "ollama" "model_providers/__init__.py"; then
-        # Backup the original file
         print_status "Updating model_providers/__init__.py to include Ollama..."
         cp model_providers/__init__.py model_providers/__init__.py.bak
-        print_status "Backed up original __init__.py file"
         
-        # Use alternate delimiter for sed to avoid problems with quotes
         sed -i 's/PROVIDERS = {/PROVIDERS = {\n    "ollama": "model_providers.ollama_provider",/g' model_providers/__init__.py
         sed -i 's/api_key_env_vars = {/api_key_env_vars = {\n        "ollama": "OLLAMA_API_URL",/g' model_providers/__init__.py
         sed -i 's/provider_classes = {/provider_classes = {\n            "ollama": "OllamaProvider",/g' model_providers/__init__.py
@@ -1237,11 +857,9 @@ EOF_INIT
     update_progress
 }
 
-# Pull and download base models
 setup_models() {
     print_status "Setting up base models in Ollama..."
     
-    # Check if Ollama is running, and wait for it if needed
     if ! curl -s --head --fail http://localhost:11434/api/tags > /dev/null 2>&1; then
         print_status "Waiting for Ollama to be ready before downloading models..."
         if ! wait_for_ollama; then
@@ -1251,7 +869,6 @@ setup_models() {
         fi
     fi
     
-    # Check what models are already available
     local available_models
     available_models=$(curl -s http://localhost:11434/api/tags 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d':' -f2 | tr -d '"' | sort || echo "")
     
@@ -1261,26 +878,21 @@ setup_models() {
         return
     fi
     
-    # Try to download llama3 or another suitable model
     print_message "Downloading base model (llama3)..."
     print_status "This may take a while depending on your internet connection"
     
-    # Show a spinner while downloading
     local spin='-\|/'
     local i=0
     
-    # Start downloading in background
     ollama pull llama3 > "${TEMP_DIR}/ollama-pull.log" 2>&1 &
     local pull_pid=$!
     
-    # Display a spinner while download is in progress
     while kill -0 $pull_pid 2>/dev/null; do
         i=$(( (i+1) % 4 ))
         printf "\r${CYAN}Downloading model... ${spin:$i:1} ${NC}"
         sleep 0.5
     done
     
-    # Check if the download was successful
     if wait $pull_pid; then
         printf "\r${GREEN}Download complete!     ${NC}\n"
         print_success "Successfully pulled llama3 model"
@@ -1290,7 +902,6 @@ setup_models() {
         print_status "You can manually download models later with 'ollama pull <model>'"
         print_status "Check the log at ${TEMP_DIR}/ollama-pull.log for details"
         
-        # Try to pull a smaller model as fallback
         print_status "Trying to pull a smaller model (phi) as fallback..."
         if ollama pull phi > "${TEMP_DIR}/ollama-pull-phi.log" 2>&1; then
             print_success "Successfully pulled phi model (lightweight alternative)"
@@ -1302,11 +913,9 @@ setup_models() {
     update_progress
 }
 
-# Verify app configuration
 verify_config() {
     print_status "Verifying application configuration..."
     
-    # Check for app.py
     if [ ! -f "app.py" ]; then
         print_warning "app.py not found in the current directory"
         print_status "Make sure you're in the right directory or create app.py"
@@ -1314,7 +923,6 @@ verify_config() {
         print_status "Found app.py"
     fi
     
-    # Check for templates directory
     if [ ! -d "templates" ] || [ -z "$(ls -A templates 2>/dev/null)" ]; then
         print_warning "templates directory is empty or missing"
         print_status "You may need to create template files for the Flask application"
@@ -1322,7 +930,6 @@ verify_config() {
         print_status "Found templates directory with files"
     fi
     
-    # Check for static files
     if [ ! -d "static" ] || [ -z "$(ls -A static 2>/dev/null)" ]; then
         print_warning "static directory is empty or missing"
         print_status "You may need to create static files for the Flask application"
@@ -1332,3 +939,213 @@ verify_config() {
     
     update_progress
 }
+
+start_flask() {
+    print_status "Preparing to start Flask application..."
+    
+    mkdir -p logs
+    
+    if [ -z "$VIRTUAL_ENV" ]; then
+        print_status "Activating virtual environment..."
+        source venv/bin/activate
+    fi
+    
+    export FLASK_APP=app.py
+    print_status "Set FLASK_APP=app.py"
+    
+    LOG_FILE="logs/flask_$(date +%Y%m%d_%H%M%S).log"
+    print_status "Logs will be written to: $LOG_FILE"
+    
+    if command_exists lsof; then
+        PORT_PID=$(lsof -ti:9000 2>/dev/null)
+        if [ ! -z "$PORT_PID" ]; then
+            print_warning "Port 9000 is already in use by process $PORT_PID"
+            read -p "Do you want to stop the existing process and continue? (y/n): " stop_process
+            if [[ "$stop_process" == "y" || "$stop_process" == "Y" ]]; then
+                print_status "Stopping process $PORT_PID..."
+                kill -9 $PORT_PID 2>/dev/null || $USE_SUDO kill -9 $PORT_PID
+                sleep 2
+            else
+                print_error "Port 9000 is already in use. Please stop the existing process or use a different port."
+                exit 1
+            fi
+        fi
+    elif command_exists netstat; then
+        if netstat -tuln | grep -q ":9000 "; then
+            print_warning "Port 9000 is already in use"
+            read -p "Do you want to continue anyway? (y/n): " continue_anyway
+            if [[ "$continue_anyway" != "y" && "$continue_anyway" != "Y" ]]; then
+                print_error "Aborted by user"
+                exit 1
+            fi
+        fi
+    fi
+    
+    print_message "Starting Flask application on http://0.0.0.0:9000"
+    if command_exists gunicorn; then
+        print_status "Using gunicorn for production-ready server..."
+        nohup gunicorn -b 0.0.0.0:9000 -w 4 --access-logfile logs/access.log --error-logfile logs/error.log app:app > "$LOG_FILE" 2>&1 &
+        FLASK_PID=$!
+    else
+        print_status "Using Flask development server (consider installing gunicorn for production)..."
+        nohup flask run --host=0.0.0.0 --port=9000 > "$LOG_FILE" 2>&1 &
+        FLASK_PID=$!
+    fi
+    
+    print_status "Waiting for server to start..."
+    sleep 3
+    
+    if ps -p $FLASK_PID > /dev/null; then
+        print_success "Application started in background with PID: $FLASK_PID"
+        
+        if command_exists curl; then
+            if curl -s --head --fail http://localhost:9000 > /dev/null; then
+                print_success "Server is responding to requests"
+            else
+                print_warning "Server is running but not responding yet. It may need more time to initialize."
+            fi
+        fi
+    else
+        print_error "Flask application failed to start"
+        print_status "Check the log at $LOG_FILE for details"
+        cat "$LOG_FILE"
+        exit 1
+    fi
+    
+    LOCAL_IP=$(hostname -I | awk '{print $1}')
+    if [ -z "$LOCAL_IP" ]; then
+        LOCAL_IP="localhost"
+    fi
+    
+    update_progress
+    
+    echo
+    echo -e "${BOLD}${GREEN}====== Application Summary ======${NC}"
+    echo -e "${BOLD}Flask Web Interface:${NC} http://$LOCAL_IP:9000"
+    echo -e "${BOLD}Ollama API:${NC} http://$LOCAL_IP:11434"
+    echo -e "${BOLD}Log File:${NC} $(pwd)/$LOG_FILE"
+    echo -e "${BOLD}Process ID:${NC} $FLASK_PID (use 'kill $FLASK_PID' to stop)"
+    echo
+    echo -e "${BOLD}${GREEN}==================================${NC}"
+    echo
+    print_message "AI Development Orchestration System is now running!"
+}
+
+main() {
+    show_banner
+    START_TIME=$(date +%s)
+    
+    print_message "Starting AI Code Development Orchestration System setup at $(date)"
+    
+    check_project_directory
+    check_required_commands
+    check_root
+    detect_os
+    
+    if [ "$SKIP_SYSTEM" = "false" ]; then
+        print_message "Preparing system..."
+        update_system
+        install_python
+        install_pip
+    else
+        print_message "Skipping system updates as requested."
+        update_progress
+        update_progress
+        update_progress
+    fi
+    
+    if [ "$SKIP_OLLAMA" = "false" ]; then
+        print_message "Setting up Ollama..."
+        install_ollama
+    else
+        print_message "Skipping Ollama installation as requested."
+        update_progress
+    fi
+    
+    print_message "Setting up Python environment..."
+    setup_venv
+    install_dependencies
+    check_api_keys
+    create_directories
+    create_ollama_provider
+    
+    if [ "$SKIP_OLLAMA" = "false" ]; then
+        setup_models
+    else
+        print_message "Skipping model downloads as Ollama is skipped."
+        update_progress
+    fi
+    
+    verify_config
+    
+    print_message "Starting Flask application..."
+    start_flask
+    
+    END_TIME=$(date +%s)
+    TOTAL_TIME=$((END_TIME - START_TIME))
+    MINUTES=$((TOTAL_TIME / 60))
+    SECONDS=$((TOTAL_TIME % 60))
+    
+    print_success "Setup completed in ${MINUTES}m ${SECONDS}s"
+}
+
+if [ "$DEBUG" = "true" ]; then
+    print_warning "Debug mode enabled"
+    print_debug "Bash version: $BASH_VERSION"
+    print_debug "OS details: $(uname -a)"
+    print_debug "Current working directory: $(pwd)"
+    set -x
+fi
+
+if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
+    echo -e "${BOLD}${BLUE}AI Development Orchestration System Setup Script${NC}"
+    echo
+    echo "Usage: ./run.sh [OPTIONS]"
+    echo
+    echo "Options:"
+    echo "  --help, -h     Show this help message"
+    echo "  --debug        Enable debug output"
+    echo "  --skip-system  Skip system updates and tool installation"
+    echo "  --skip-ollama  Skip Ollama installation"
+    echo
+    echo "Environment variables:"
+    echo "  DEBUG=true     Enable debug mode"
+    echo
+    exit 0
+fi
+
+SKIP_SYSTEM=false
+SKIP_OLLAMA=false
+
+for arg in "$@"; do
+    case $arg in
+        --debug)
+            DEBUG=true
+            print_warning "Debug mode enabled"
+            ;;
+        --skip-system)
+            SKIP_SYSTEM=true
+            print_warning "Skipping system updates and tool installation"
+            ;;
+        --skip-ollama)
+            SKIP_OLLAMA=true
+            print_warning "Skipping Ollama installation"
+            ;;
+        *)
+            print_warning "Unknown option: $arg"
+            ;;
+    esac
+done
+
+unset PYTHONPATH
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+
+[ -z "$DEBUG" ] && DEBUG=false
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main
+else
+    print_warning "This script is meant to be executed, not sourced."
+    print_message "Run it with: ./run.sh [OPTIONS]"
+fi
