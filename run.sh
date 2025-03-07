@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # AI Code Development Orchestration System
-# Main runner script to set up environment and run the Flask application
+# Enhanced runner script to set up environment, install all dependencies, and run the Flask application
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
@@ -34,11 +34,53 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Check if Python 3.6+ is installed
-check_python() {
+# Function to check if running as root
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        print_warning "This script is not running as root. Some operations may require sudo privileges."
+        print_warning "You may be prompted for your password during execution."
+        USE_SUDO="sudo"
+    else
+        USE_SUDO=""
+    fi
+}
+
+# Function to detect the OS
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$NAME
+        OS_VERSION=$VERSION_ID
+        print_message "Detected OS: $OS $OS_VERSION"
+    else
+        print_warning "Could not detect OS, assuming Debian/Ubuntu compatible"
+        OS="Unknown"
+    fi
+}
+
+# Update and upgrade the system
+update_system() {
+    print_message "Updating system packages..."
+    $USE_SUDO apt-get update -y
+    print_success "Package lists updated"
+    
+    print_message "Upgrading installed packages..."
+    $USE_SUDO apt-get upgrade -y
+    print_success "System packages upgraded"
+    
+    print_message "Installing essential tools..."
+    $USE_SUDO apt-get install -y net-tools curl wget git build-essential software-properties-common
+    print_success "Essential tools installed"
+}
+
+# Install Python 3 if not already installed
+install_python() {
     if ! command_exists python3; then
-        print_error "Python 3 is not installed. Please install Python 3.6 or higher."
-        exit 1
+        print_message "Installing Python 3..."
+        $USE_SUDO apt-get install -y python3 python3-dev python3-venv
+        print_success "Python 3 installed"
+    else
+        print_success "Python 3 is already installed"
     fi
     
     # Check Python version
@@ -47,21 +89,119 @@ check_python() {
     python_minor=$(echo $python_version | cut -d. -f2)
     
     if [ "$python_major" -lt 3 ] || ([ "$python_major" -eq 3 ] && [ "$python_minor" -lt 6 ]); then
-        print_error "Python version must be 3.6 or higher. Current version: $python_version"
-        exit 1
+        print_warning "Python version should be 3.6 or higher. Current version: $python_version"
+        print_message "Attempting to install Python 3.10..."
+        
+        if [[ "$OS" == *"Ubuntu"* ]] || [[ "$OS" == *"Debian"* ]]; then
+            $USE_SUDO add-apt-repository -y ppa:deadsnakes/ppa
+            $USE_SUDO apt-get update
+            $USE_SUDO apt-get install -y python3.10 python3.10-venv python3.10-dev
+            
+            # Create symbolic links if necessary
+            if [ ! -f /usr/bin/python3.10 ]; then
+                print_error "Python 3.10 installation failed"
+                exit 1
+            else
+                print_success "Python 3.10 installed successfully"
+            fi
+        else
+            print_error "Automatic Python upgrade not supported on this OS"
+            print_message "Please install Python 3.6+ manually and run this script again"
+            exit 1
+        fi
+    else
+        print_success "Python $python_version detected"
     fi
-    
-    print_success "Python $python_version detected"
 }
 
-# Check if pip is installed
-check_pip() {
+# Install pip if not already installed
+install_pip() {
     if ! command_exists pip3; then
-        print_error "pip3 is not installed. Please install pip for Python 3."
-        exit 1
+        print_message "Installing pip for Python 3..."
+        $USE_SUDO apt-get install -y python3-pip
+        print_success "pip3 installed"
+    else
+        print_success "pip3 is already installed"
+        
+        print_message "Upgrading pip to latest version..."
+        $USE_SUDO python3 -m pip install --upgrade pip
+        print_success "pip upgraded"
+    fi
+}
+
+# Install Ollama and Web UI
+install_ollama() {
+    print_message "Installing Ollama..."
+    
+    if ! command_exists ollama; then
+        curl -fsSL https://ollama.com/install.sh | $USE_SUDO sh
+        print_success "Ollama installed"
+    else
+        print_success "Ollama is already installed"
     fi
     
-    print_success "pip3 detected"
+    # Make sure Ollama service is running
+    print_message "Starting Ollama service..."
+    if command_exists systemctl; then
+        $USE_SUDO systemctl enable --now ollama
+        $USE_SUDO systemctl restart ollama
+    else
+        # Start Ollama in the background if not managed by systemd
+        nohup ollama serve > ollama.log 2>&1 &
+    fi
+    
+    # Wait for Ollama to start up
+    print_message "Waiting for Ollama service to start..."
+    sleep 5
+    
+    # Install Ollama Web UI
+    print_message "Installing Ollama Web UI..."
+    
+    if [ ! -d "ollama-webui" ]; then
+        git clone https://github.com/ollama-webui/ollama-webui.git
+        cd ollama-webui
+        
+        # If using Docker method
+        if command_exists docker; then
+            $USE_SUDO docker-compose up -d
+            print_success "Ollama Web UI started with Docker"
+        else
+            # Install Node.js and build the web UI
+            if ! command_exists node; then
+                print_message "Installing Node.js..."
+                curl -fsSL https://deb.nodesource.com/setup_18.x | $USE_SUDO bash -
+                $USE_SUDO apt-get install -y nodejs
+            fi
+            
+            print_message "Building Ollama Web UI..."
+            npm install
+            npm run build
+            
+            # Start the Web UI in the background
+            npm run start > ollama-webui.log 2>&1 &
+            print_success "Ollama Web UI started"
+        fi
+        
+        cd ..
+    else
+        print_success "Ollama Web UI already installed"
+        
+        # Ensure it's running
+        cd ollama-webui
+        if command_exists docker; then
+            $USE_SUDO docker-compose restart
+        else
+            # Kill any existing processes and restart
+            pkill -f "npm run start" || true
+            npm run start > ollama-webui.log 2>&1 &
+        fi
+        cd ..
+        
+        print_success "Ollama Web UI restarted"
+    fi
+    
+    print_message "Ollama available at http://localhost:11434"
+    print_message "Ollama Web UI available at http://localhost:3000"
 }
 
 # Check if virtual environment exists, create if not
@@ -86,6 +226,9 @@ install_dependencies() {
     
     # Install Flask and other main dependencies
     pip3 install flask flask-login anthropic>=0.5.0 tqdm>=4.65.0 python-dotenv aiohttp openai
+    
+    # Additional dependencies for better functionality
+    pip3 install flask-cors gunicorn flask-wtf flask-socketio
     
     # Install component-specific dependencies
     if [ -f "orchestrator/requirements.txt" ]; then
@@ -155,6 +298,14 @@ check_api_keys() {
     else
         print_success "DeepSeek API key detected"
     fi
+    
+    # Set Ollama API URL
+    if [ -z "$OLLAMA_API_URL" ]; then
+        print_message "Setting Ollama API URL..."
+        echo "OLLAMA_API_URL=http://localhost:11434" >> .env
+        export OLLAMA_API_URL="http://localhost:11434"
+        print_success "Ollama API URL set to http://localhost:11434"
+    fi
 }
 
 # Create necessary directories if they don't exist
@@ -165,6 +316,7 @@ create_directories() {
     mkdir -p templates
     mkdir -p static/css
     mkdir -p static/js
+    mkdir -p logs
     
     # Set proper permissions for execution
     chmod +x run.sh
@@ -415,29 +567,330 @@ EOF
         print_success "Created main.js"
     fi
     
-    print_success "Template files created"
+    # Create Ollama provider module
+    if [ ! -f "model_providers/ollama_provider.py" ]; then
+        mkdir -p model_providers
+        cat > model_providers/ollama_provider.py << 'EOF'
+"""
+Ollama Provider
+Implementation for Ollama local models
+"""
+
+import os
+import re
+import json
+import aiohttp
+from typing import Dict, Any, List, Optional
+
+from model_providers.base_provider import BaseModelProvider
+
+
+class OllamaProvider(BaseModelProvider):
+    """
+    Provider implementation for Ollama local models
+    """
+    
+    def __init__(self, api_url: str = None, model: str = "llama3"):
+        """
+        Initialize the Ollama provider
+        
+        Args:
+            api_url: Ollama API URL, defaults to environment variable
+            model: Ollama model to use
+        """
+        self.api_url = api_url or os.environ.get("OLLAMA_API_URL", "http://localhost:11434")
+        self.model = model
+        
+    async def generate_response(self, 
+                               prompt: str, 
+                               system_prompt: Optional[str] = None,
+                               temperature: float = 0.7,
+                               max_tokens: int = 4000) -> str:
+        """
+        Generate a response from Ollama
+        
+        Args:
+            prompt: The user prompt to send to Ollama
+            system_prompt: System instructions for Ollama (optional)
+            temperature: Controls randomness, higher values = more random
+            max_tokens: Maximum number of tokens to generate
+            
+        Returns:
+            String containing Ollama's response
+        """
+        try:
+            # Prepare the request payload
+            payload = {
+                "model": self.model,
+                "prompt": prompt,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": False
+            }
+            
+            # Add system prompt if provided
+            if system_prompt:
+                payload["system"] = system_prompt
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{self.api_url}/api/generate", json=payload) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise Exception(f"API Error: {response.status} - {error_text}")
+                    
+                    result = await response.json()
+                    return result.get("response", "")
+            
+        except Exception as e:
+            print(f"Error generating response from Ollama: {e}")
+            return f"Error: {str(e)}"
+    
+    async def extract_code(self, response: str) -> List[str]:
+        """
+        Extract code blocks from Ollama's response
+        
+        Args:
+            response: The full text response from Ollama
+            
+        Returns:
+            List of extracted code blocks
+        """
+        # Pattern to match code blocks with or without language specification
+        pattern = r'```(?:\w+\n)?(.*?)```'
+        matches = re.findall(pattern, response, re.DOTALL)
+        
+        # If no matches found, check if the entire response might be code
+        if not matches and not response.startswith('```') and not response.endswith('```'):
+            # Heuristic: If response has multiple lines and looks like code
+            lines = response.split('\n')
+            if len(lines) > 1 and any(line.strip().startswith(('def ', 'class ', 'import ', 'from ')) for line in lines):
+                return [response]
+        
+        return matches
+    
+    def get_model_name(self) -> str:
+        """Get the name of the currently used Ollama model"""
+        return self.model
+    
+    def get_provider_name(self) -> str:
+        """Get the provider name"""
+        return "ollama"
+    
+    def get_context_window(self) -> int:
+        """
+        Get Ollama's context window size in tokens
+        
+        Returns:
+            Integer representing the context window size
+        """
+        # Context window sizes for different Ollama models
+        context_windows = {
+            "llama3": 8192,
+            "llama2": 4096,
+            "codellama": 16384,
+            "mistral": 8192,
+            "mixtral": 32768,
+            "phi3": 8192
+        }
+        
+        # Try to extract base model from model name (e.g., "llama3:latest" -> "llama3")
+        base_model = self.model.split(':')[0].lower()
+        
+        return context_windows.get(base_model, 4096)  # Default to 4K if unknown
+    
+    def count_tokens(self, text: str) -> int:
+        """
+        Count the number of tokens in a text
+        
+        Args:
+            text: The text to count tokens for
+            
+        Returns:
+            Integer representing the token count
+        """
+        # Ollama doesn't have a public tokenizer endpoint, so use rough estimate
+        # A better approach would be to call the tokenize API if/when it becomes available
+        return len(text.split()) * 1.3  # Rough estimate based on typical tokenization
+EOF
+        print_success "Created Ollama provider module"
+    fi
+    
+    # Update __init__.py to include Ollama provider
+    if [ -f "model_providers/__init__.py" ]; then
+        # Check if Ollama provider is already included
+        if ! grep -q "ollama" "model_providers/__init__.py"; then
+            # Backup the original file
+            cp model_providers/__init__.py model_providers/__init__.py.bak
+            
+            # Update the provider mapping to include Ollama
+            sed -i 's/PROVIDERS = {/PROVIDERS = {\n    \'ollama\': \'model_providers.ollama_provider\',/g' model_providers/__init__.py
+            
+            # Update the api_key_env_vars dictionary
+            sed -i 's/api_key_env_vars = {/api_key_env_vars = {\n        \'ollama\': \'OLLAMA_API_URL\',/g' model_providers/__init__.py
+            
+            # Update the provider_classes dictionary
+            sed -i 's/provider_classes = {/provider_classes = {\n            \'ollama\': \'OllamaProvider\',/g' model_providers/__init__.py
+            
+            print_success "Updated model_providers/__init__.py to include Ollama"
+        else
+            print_success "Ollama provider already included in model_providers/__init__.py"
+        fi
+    else
+        # Create the __init__.py file with Ollama support
+        cat > model_providers/__init__.py << 'EOF'
+"""
+Model Providers Module
+Factory for getting appropriate model providers
+"""
+
+import os
+import importlib
+from typing import Optional, Any
+
+# Define provider mapping
+PROVIDERS = {
+    'ollama': 'model_providers.ollama_provider',
+    'claude': 'model_providers.claude_provider',
+    'openai': 'model_providers.openai_provider',
+    'deepseek': 'model_providers.deepseek_provider'
 }
 
-# Main function
-main() {
-    print_message "Starting AI Code Development Orchestration System setup..."
+def get_provider(provider_name: str) -> Optional[Any]:
+    """
+    Factory function to get the appropriate model provider
     
-    # Perform checks
-    check_python
-    check_pip
-    setup_venv
-    install_dependencies
-    check_api_keys
-    create_directories
-    create_templates
+    Args:
+        provider_name: Name of the provider to instantiate
     
-    # Run the Flask application with nohup
-    print_message "Starting Flask application on http://0.0.0.0:9000 in the background"
-    export FLASK_APP=app.py
-    nohup flask run --host=0.0.0.0 --port=9000 > flask.log 2>&1 &
-    print_success "Application started in background with PID: $!"
-    print_message "You can view logs at: $(pwd)/flask.log"
+    Returns:
+        An instance of the requested provider or None if not available
+    """
+    if provider_name not in PROVIDERS:
+        raise ValueError(f"Unknown provider: {provider_name}")
+    
+    # Check for API key
+    api_key_env_vars = {
+        'ollama': 'OLLAMA_API_URL',
+        'claude': 'ANTHROPIC_API_KEY',
+        'openai': 'OPENAI_API_KEY',
+        'deepseek': 'DEEPSEEK_API_KEY'
+    }
+    
+    api_key = os.environ.get(api_key_env_vars.get(provider_name))
+    
+    # Special case for Ollama - use default URL if not set
+    if provider_name == 'ollama' and not api_key:
+        api_key = "http://localhost:11434"
+    
+    if not api_key and provider_name != 'ollama':
+        print(f"Warning: No API key found for {provider_name}")
+        return None
+    
+    try:
+        # Import the module dynamically
+        module_path = PROVIDERS[provider_name]
+        module = importlib.import_module(module_path)
+        
+        # Get the provider class
+        provider_classes = {
+            'ollama': 'OllamaProvider',
+            'claude': 'ClaudeProvider',
+            'openai': 'OpenAIProvider',
+            'deepseek': 'DeepSeekProvider'
+        }
+        
+        provider_class = getattr(module, provider_classes[provider_name])
+        
+        # Instantiate the provider
+        if provider_name == 'ollama':
+            return provider_class(api_url=api_key)
+        else:
+            return provider_class(api_key=api_key)
+    
+    except (ImportError, AttributeError) as e:
+        print(f"Error initializing provider {provider_name}: {e}")
+        return None
+EOF
+        print_success "Created model_providers/__init__.py with Ollama support"
+    fi
+    
+    print_success "Template files created/updated"
 }
 
-# Run the main function
-main
+# Create production configuration for Flask
+create_production_config() {
+    print_message "Creating production configuration..."
+    
+    # Create a proper systemd service file for the Flask application
+    if command_exists systemctl; then
+        cat > ai-dev-orchestrator.service << EOF
+[Unit]
+Description=AI Development Orchestration System
+After=network.target
+
+[Service]
+User=$(whoami)
+WorkingDirectory=$(pwd)
+ExecStart=$(pwd)/venv/bin/gunicorn -b 0.0.0.0:9000 -w 4 app:app
+Restart=always
+RestartSec=5
+Environment="PATH=$(pwd)/venv/bin:$PATH"
+EnvironmentFile=$(pwd)/.env
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        
+        # Install the service if running as root
+        if [ -z "$USE_SUDO" ]; then
+            mv ai-dev-orchestrator.service /etc/systemd/system/
+            systemctl daemon-reload
+            systemctl enable ai-dev-orchestrator.service
+            print_success "Systemd service installed and enabled"
+        else
+            print_message "To install the systemd service, run:"
+            print_message "$USE_SUDO mv $(pwd)/ai-dev-orchestrator.service /etc/systemd/system/"
+            print_message "$USE_SUDO systemctl daemon-reload"
+            print_message "$USE_SUDO systemctl enable ai-dev-orchestrator.service"
+        fi
+    fi
+    
+    # Create a backup startup script that doesn't rely on systemd
+    cat > start_server.sh << 'EOF'
+#!/bin/bash
+source venv/bin/activate
+export FLASK_APP=app.py
+export FLASK_ENV=production
+gunicorn -b 0.0.0.0:9000 -w 4 app:app
+EOF
+    chmod +x start_server.sh
+    
+    print_success "Production configuration created"
+}
+
+# Configure firewall rules
+configure_firewall() {
+    print_message "Configuring firewall rules..."
+    
+    if command_exists ufw; then
+        $USE_SUDO ufw allow 9000/tcp
+        $USE_SUDO ufw allow 11434/tcp
+        $USE_SUDO ufw allow 3000/tcp
+        
+        # Only enable if ufw is installed but not active
+        if ! $USE_SUDO ufw status | grep -q "Status: active"; then
+            print_warning "Firewall (ufw) is not active. Enable with: sudo ufw enable"
+        fi
+        
+        print_success "Firewall rules configured for ports 9000, 11434, and 3000"
+    elif command_exists firewall-cmd; then
+        $USE_SUDO firewall-cmd --permanent --add-port=9000/tcp
+        $USE_SUDO firewall-cmd --permanent --add-port=11434/tcp
+        $USE_SUDO firewall-cmd --permanent --add-port=3000/tcp
+        $USE_SUDO firewall-cmd --reload
+        
+        print_success "Firewall rules configured for ports 9000, 11434, and 3000"
+    else
+        print_warning "No supported firewall detected. Please manually configure firewall rules if needed."
+        print_warning "You may need to allow traffic on ports 9000, 11434, and 3000"
+    fi
