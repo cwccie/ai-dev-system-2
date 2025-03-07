@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # AI Code Development Orchestration System
-# Enhanced runner script to set up environment, install all dependencies, and run the Flask application
+# Enhanced runner script to set up environment, install all dependencies, and run Flask
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
@@ -37,7 +37,7 @@ command_exists() {
 # Function to check if running as root
 check_root() {
     if [ "$EUID" -ne 0 ]; then
-        print_warning "This script is not running as root. Some operations may require sudo privileges."
+        print_warning "This script is not running as root. Some operations may require sudo."
         print_warning "You may be prompted for your password during execution."
         USE_SUDO="sudo"
     else
@@ -85,32 +85,13 @@ install_python() {
     
     # Check Python version
     python_version=$(python3 --version | cut -d' ' -f2)
-    python_major=$(echo $python_version | cut -d. -f1)
-    python_minor=$(echo $python_version | cut -d. -f2)
+    print_success "Python $python_version detected"
     
-    if [ "$python_major" -lt 3 ] || ([ "$python_major" -eq 3 ] && [ "$python_minor" -lt 6 ]); then
-        print_warning "Python version should be 3.6 or higher. Current version: $python_version"
-        print_message "Attempting to install Python 3.10..."
-        
-        if [[ "$OS" == *"Ubuntu"* ]] || [[ "$OS" == *"Debian"* ]]; then
-            $USE_SUDO add-apt-repository -y ppa:deadsnakes/ppa
-            $USE_SUDO apt-get update
-            $USE_SUDO apt-get install -y python3.10 python3.10-venv python3.10-dev
-            
-            # Create symbolic links if necessary
-            if [ ! -f /usr/bin/python3.10 ]; then
-                print_error "Python 3.10 installation failed"
-                exit 1
-            else
-                print_success "Python 3.10 installed successfully"
-            fi
-        else
-            print_error "Automatic Python upgrade not supported on this OS"
-            print_message "Please install Python 3.6+ manually and run this script again"
-            exit 1
-        fi
-    else
-        print_success "Python $python_version detected"
+    # Make sure python3-venv is installed
+    if ! $USE_SUDO dpkg -l | grep -q python3-venv; then
+        print_message "Installing python3-venv package..."
+        $USE_SUDO apt-get install -y python3-venv
+        print_success "python3-venv installed"
     fi
 }
 
@@ -129,7 +110,7 @@ install_pip() {
     fi
 }
 
-# Install Ollama and Web UI
+# Install Ollama
 install_ollama() {
     print_message "Installing Ollama..."
     
@@ -140,7 +121,7 @@ install_ollama() {
         print_success "Ollama is already installed"
     fi
     
-    # Make sure Ollama service is running
+    # Start Ollama service
     print_message "Starting Ollama service..."
     if command_exists systemctl; then
         $USE_SUDO systemctl enable --now ollama
@@ -150,58 +131,9 @@ install_ollama() {
         nohup ollama serve > ollama.log 2>&1 &
     fi
     
-    # Wait for Ollama to start up
     print_message "Waiting for Ollama service to start..."
     sleep 5
-    
-    # Install Ollama Web UI
-    print_message "Installing Ollama Web UI..."
-    
-    if [ ! -d "ollama-webui" ]; then
-        git clone https://github.com/ollama-webui/ollama-webui.git
-        cd ollama-webui
-        
-        # If using Docker method
-        if command_exists docker; then
-            $USE_SUDO docker-compose up -d
-            print_success "Ollama Web UI started with Docker"
-        else
-            # Install Node.js and build the web UI
-            if ! command_exists node; then
-                print_message "Installing Node.js..."
-                curl -fsSL https://deb.nodesource.com/setup_18.x | $USE_SUDO bash -
-                $USE_SUDO apt-get install -y nodejs
-            fi
-            
-            print_message "Building Ollama Web UI..."
-            npm install
-            npm run build
-            
-            # Start the Web UI in the background
-            npm run start > ollama-webui.log 2>&1 &
-            print_success "Ollama Web UI started"
-        fi
-        
-        cd ..
-    else
-        print_success "Ollama Web UI already installed"
-        
-        # Ensure it's running
-        cd ollama-webui
-        if command_exists docker; then
-            $USE_SUDO docker-compose restart
-        else
-            # Kill any existing processes and restart
-            pkill -f "npm run start" || true
-            npm run start > ollama-webui.log 2>&1 &
-        fi
-        cd ..
-        
-        print_success "Ollama Web UI restarted"
-    fi
-    
-    print_message "Ollama available at http://localhost:11434"
-    print_message "Ollama Web UI available at http://localhost:3000"
+    print_success "Ollama service started"
 }
 
 # Check if virtual environment exists, create if not
@@ -228,7 +160,7 @@ install_dependencies() {
     pip3 install flask flask-login anthropic>=0.5.0 tqdm>=4.65.0 python-dotenv aiohttp openai
     
     # Additional dependencies for better functionality
-    pip3 install flask-cors gunicorn flask-wtf flask-socketio
+    pip3 install flask-cors gunicorn flask-wtf
     
     # Install component-specific dependencies
     if [ -f "orchestrator/requirements.txt" ]; then
@@ -332,242 +264,11 @@ create_directories() {
     print_success "Directory structure ensured"
 }
 
-# Create template files if they don't exist
-create_templates() {
-    print_message "Ensuring template files exist..."
+# Create Ollama provider module
+create_ollama_provider() {
+    print_message "Creating Ollama provider module..."
     
-    # Create CSS file
-    if [ ! -f "static/css/main.css" ]; then
-        cat > static/css/main.css << 'EOF'
-/* Main styles for AI Dev Orchestration System */
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    line-height: 1.6;
-    margin: 0;
-    padding: 0;
-    color: #333;
-    background-color: #f8f9fa;
-}
-
-.container {
-    width: 90%;
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 20px;
-}
-
-header {
-    background-color: #0366d6;
-    color: white;
-    padding: 1rem;
-    margin-bottom: 2rem;
-}
-
-h1, h2, h3 {
-    color: #0366d6;
-}
-
-.card {
-    background: white;
-    border-radius: 5px;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-    padding: 20px;
-    margin-bottom: 20px;
-}
-
-.form-group {
-    margin-bottom: 15px;
-}
-
-label {
-    display: block;
-    margin-bottom: 5px;
-    font-weight: bold;
-}
-
-input[type="text"], 
-input[type="password"],
-select, 
-textarea {
-    width: 100%;
-    padding: 8px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    box-sizing: border-box;
-    font-size: 16px;
-}
-
-textarea {
-    min-height: 150px;
-}
-
-button, .btn {
-    background-color: #0366d6;
-    color: white;
-    border: none;
-    padding: 10px 15px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 16px;
-}
-
-button:hover, .btn:hover {
-    background-color: #0258b8;
-}
-
-.alert {
-    padding: 10px 15px;
-    border-radius: 4px;
-    margin-bottom: 15px;
-}
-
-.alert-success {
-    background-color: #d4edda;
-    color: #155724;
-    border: 1px solid #c3e6cb;
-}
-
-.alert-warning {
-    background-color: #fff3cd;
-    color: #856404;
-    border: 1px solid #ffeeba;
-}
-
-.alert-danger {
-    background-color: #f8d7da;
-    color: #721c24;
-    border: 1px solid #f5c6cb;
-}
-
-.model-settings {
-    display: none;
-    padding-top: 15px;
-    border-top: 1px solid #eee;
-}
-
-.provider-section {
-    margin-bottom: 30px;
-}
-
-.footer {
-    margin-top: 50px;
-    text-align: center;
-    color: #6c757d;
-    font-size: 14px;
-    padding: 20px 0;
-    border-top: 1px solid #eee;
-}
-EOF
-        print_success "Created main.css"
-    fi
-    
-    # Create JavaScript file
-    if [ ! -f "static/js/main.js" ]; then
-        cat > static/js/main.js << 'EOF'
-// Main JavaScript file for AI Dev Orchestration System
-
-document.addEventListener('DOMContentLoaded', function() {
-    // Handle model provider selection
-    const modelSelectElements = document.querySelectorAll('.model-select');
-    
-    modelSelectElements.forEach(select => {
-        select.addEventListener('change', function() {
-            const parent = this.closest('.provider-section');
-            const allSettings = parent.querySelectorAll('.model-settings');
-            
-            // Hide all settings first
-            allSettings.forEach(settings => {
-                settings.style.display = 'none';
-            });
-            
-            // Show selected model settings
-            const selectedModel = this.value;
-            const targetSettings = parent.querySelector(`.${selectedModel}-settings`);
-            if (targetSettings) {
-                targetSettings.style.display = 'block';
-            }
-        });
-        
-        // Trigger change event to set initial state
-        select.dispatchEvent(new Event('change'));
-    });
-    
-    // Handle form submissions with AJAX
-    const scriptForm = document.getElementById('script-form');
-    if (scriptForm) {
-        scriptForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const resultContainer = document.getElementById('result-container');
-            resultContainer.innerHTML = '<div class="alert alert-info">Generating script... This may take a moment.</div>';
-            
-            const formData = new FormData(this);
-            
-            fetch(this.action, {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    resultContainer.innerHTML = `
-                        <div class="alert alert-success">Script generated successfully!</div>
-                        <div class="card">
-                            <h3>Generated Script</h3>
-                            <pre><code>${data.script}</code></pre>
-                        </div>
-                    `;
-                } else {
-                    resultContainer.innerHTML = `
-                        <div class="alert alert-danger">Error: ${data.error}</div>
-                    `;
-                }
-            })
-            .catch(error => {
-                resultContainer.innerHTML = `
-                    <div class="alert alert-danger">An error occurred during script generation.</div>
-                    <p>${error}</p>
-                `;
-                console.error('Error:', error);
-            });
-        });
-    }
-    
-    // API key management
-    const apiKeyForms = document.querySelectorAll('.api-key-form');
-    if (apiKeyForms) {
-        apiKeyForms.forEach(form => {
-            form.addEventListener('submit', function(e) {
-                e.preventDefault();
-                
-                const formData = new FormData(this);
-                const statusElement = this.querySelector('.status-message');
-                
-                fetch('/save_api_key', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        statusElement.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
-                    } else {
-                        statusElement.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
-                    }
-                })
-                .catch(error => {
-                    statusElement.innerHTML = `<div class="alert alert-danger">An error occurred while saving the API key.</div>`;
-                    console.error('Error:', error);
-                });
-            });
-        });
-    }
-});
-EOF
-        print_success "Created main.js"
-    fi
-    
-    # Create Ollama provider module
+    # Create ollama_provider.py
     if [ ! -f "model_providers/ollama_provider.py" ]; then
         mkdir -p model_providers
         cat > model_providers/ollama_provider.py << 'EOF'
@@ -709,33 +410,13 @@ class OllamaProvider(BaseModelProvider):
             Integer representing the token count
         """
         # Ollama doesn't have a public tokenizer endpoint, so use rough estimate
-        # A better approach would be to call the tokenize API if/when it becomes available
         return len(text.split()) * 1.3  # Rough estimate based on typical tokenization
 EOF
-        print_success "Created Ollama provider module"
+        print_success "Created model_providers/ollama_provider.py"
     fi
     
     # Update __init__.py to include Ollama provider
-    if [ -f "model_providers/__init__.py" ]; then
-        # Check if Ollama provider is already included
-        if ! grep -q "ollama" "model_providers/__init__.py"; then
-            # Backup the original file
-            cp model_providers/__init__.py model_providers/__init__.py.bak
-            
-            # Update the provider mapping to include Ollama
-            sed -i 's/PROVIDERS = {/PROVIDERS = {\n    \'ollama\': \'model_providers.ollama_provider\',/g' model_providers/__init__.py
-            
-            # Update the api_key_env_vars dictionary
-            sed -i 's/api_key_env_vars = {/api_key_env_vars = {\n        \'ollama\': \'OLLAMA_API_URL\',/g' model_providers/__init__.py
-            
-            # Update the provider_classes dictionary
-            sed -i 's/provider_classes = {/provider_classes = {\n            \'ollama\': \'OllamaProvider\',/g' model_providers/__init__.py
-            
-            print_success "Updated model_providers/__init__.py to include Ollama"
-        else
-            print_success "Ollama provider already included in model_providers/__init__.py"
-        fi
-    else
+    if [ ! -f "model_providers/__init__.py" ]; then
         # Create the __init__.py file with Ollama support
         cat > model_providers/__init__.py << 'EOF'
 """
@@ -812,85 +493,64 @@ def get_provider(provider_name: str) -> Optional[Any]:
         return None
 EOF
         print_success "Created model_providers/__init__.py with Ollama support"
-    fi
-    
-    print_success "Template files created/updated"
-}
-
-# Create production configuration for Flask
-create_production_config() {
-    print_message "Creating production configuration..."
-    
-    # Create a proper systemd service file for the Flask application
-    if command_exists systemctl; then
-        cat > ai-dev-orchestrator.service << EOF
-[Unit]
-Description=AI Development Orchestration System
-After=network.target
-
-[Service]
-User=$(whoami)
-WorkingDirectory=$(pwd)
-ExecStart=$(pwd)/venv/bin/gunicorn -b 0.0.0.0:9000 -w 4 app:app
-Restart=always
-RestartSec=5
-Environment="PATH=$(pwd)/venv/bin:$PATH"
-EnvironmentFile=$(pwd)/.env
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    elif ! grep -q "ollama" "model_providers/__init__.py"; then
+        # Backup the original file
+        cp model_providers/__init__.py model_providers/__init__.py.bak
         
-        # Install the service if running as root
-        if [ -z "$USE_SUDO" ]; then
-            mv ai-dev-orchestrator.service /etc/systemd/system/
-            systemctl daemon-reload
-            systemctl enable ai-dev-orchestrator.service
-            print_success "Systemd service installed and enabled"
-        else
-            print_message "To install the systemd service, run:"
-            print_message "$USE_SUDO mv $(pwd)/ai-dev-orchestrator.service /etc/systemd/system/"
-            print_message "$USE_SUDO systemctl daemon-reload"
-            print_message "$USE_SUDO systemctl enable ai-dev-orchestrator.service"
-        fi
-    fi
-    
-    # Create a backup startup script that doesn't rely on systemd
-    cat > start_server.sh << 'EOF'
-#!/bin/bash
-source venv/bin/activate
-export FLASK_APP=app.py
-export FLASK_ENV=production
-gunicorn -b 0.0.0.0:9000 -w 4 app:app
-EOF
-    chmod +x start_server.sh
-    
-    print_success "Production configuration created"
-}
-
-# Configure firewall rules
-configure_firewall() {
-    print_message "Configuring firewall rules..."
-    
-    if command_exists ufw; then
-        $USE_SUDO ufw allow 9000/tcp
-        $USE_SUDO ufw allow 11434/tcp
-        $USE_SUDO ufw allow 3000/tcp
+        # Update the provider mapping to include Ollama
+        sed -i 's/PROVIDERS = {/PROVIDERS = {\n    \'ollama\': \'model_providers.ollama_provider\',/g' model_providers/__init__.py
         
-        # Only enable if ufw is installed but not active
-        if ! $USE_SUDO ufw status | grep -q "Status: active"; then
-            print_warning "Firewall (ufw) is not active. Enable with: sudo ufw enable"
-        fi
+        # Update the api_key_env_vars dictionary
+        sed -i 's/api_key_env_vars = {/api_key_env_vars = {\n        \'ollama\': \'OLLAMA_API_URL\',/g' model_providers/__init__.py
         
-        print_success "Firewall rules configured for ports 9000, 11434, and 3000"
-    elif command_exists firewall-cmd; then
-        $USE_SUDO firewall-cmd --permanent --add-port=9000/tcp
-        $USE_SUDO firewall-cmd --permanent --add-port=11434/tcp
-        $USE_SUDO firewall-cmd --permanent --add-port=3000/tcp
-        $USE_SUDO firewall-cmd --reload
+        # Update the provider_classes dictionary
+        sed -i 's/provider_classes = {/provider_classes = {\n            \'ollama\': \'OllamaProvider\',/g' model_providers/__init__.py
         
-        print_success "Firewall rules configured for ports 9000, 11434, and 3000"
+        print_success "Updated model_providers/__init__.py to include Ollama"
     else
-        print_warning "No supported firewall detected. Please manually configure firewall rules if needed."
-        print_warning "You may need to allow traffic on ports 9000, 11434, and 3000"
+        print_success "Ollama provider already included in model_providers/__init__.py"
     fi
+}
+
+# Main function
+main() {
+    print_message "Starting AI Code Development Orchestration System setup..."
+    
+    # Check if running as root and detect OS
+    check_root
+    detect_os
+    
+    # Update and install system packages
+    print_message "Preparing system..."
+    update_system
+    install_python
+    install_pip
+    
+    # Install and configure Ollama
+    print_message "Setting up Ollama..."
+    install_ollama
+    
+    # Set up the Python environment
+    print_message "Setting up Python environment..."
+    setup_venv
+    install_dependencies
+    check_api_keys
+    create_directories
+    create_ollama_provider
+    
+    # Run the Flask application
+    print_message "Starting Flask application on http://0.0.0.0:9000"
+    source venv/bin/activate
+    export FLASK_APP=app.py
+    
+    mkdir -p logs
+    nohup flask run --host=0.0.0.0 --port=9000 > logs/flask.log 2>&1 &
+    
+    print_success "Application started in background with PID: $!"
+    print_message "You can view logs at: $(pwd)/logs/flask.log"
+    print_message "AI Development Orchestration System is now running at http://$(hostname -I | awk '{print $1}'):9000"
+    print_message "Ollama is available at http://$(hostname -I | awk '{print $1}'):11434"
+}
+
+# Run the main function
+main
