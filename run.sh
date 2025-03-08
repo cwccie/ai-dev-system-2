@@ -712,17 +712,10 @@ start_flask() {
     if [ ! -z "$FLASK_PID" ]; then
         echo -e "${BOLD}Process ID:${NC} $FLASK_PID (use 'kill $FLASK_PID' to stop)"
         echo -e "${BOLD}To stop the server:${NC} kill $(cat logs/flask.pid 2>/dev/null || echo $FLASK_PID)"
-    else
-        echo -e "${BOLD}Flask Status:${NC} Not running (manual start required)"
-    fi
-    echo
-    echo -e "${BOLD}${GREEN}==================================${NC}"
-    echo
-    print_message "AI Development Orchestration System setup complete!"
-    if [ ! -z "$FLASK_PID" ]; then
-        print_message "System is now running!"
-    else
-        print_message "Setup complete, but Flask is not running. Start it manually after fixing any issues."
+        echo
+        echo -e "${BOLD}${GREEN}=======================${NC}"
+        echo
+        print_message "Success! It finished and is ready to access at http://$LOCAL_IP:9000"
     fi
 }
 
@@ -825,43 +818,28 @@ else
     print_message "Run it with: ./run.sh [OPTIONS]"
 fi
 
-# Debug information (moved outside the if-else block)
+# Debug information
 print_debug "Bash version: $BASH_VERSION"
-print_debug "OS details: $(uname -a)"
-
-
-
-
-
-
-
-    local LOCAL_IP
-    LOCAL_IP=$(hostname -I | awk '{print $1}')
-    if [ -z "$LOCAL_IP" ]; then
-        LOCAL_IP="localhost"
+print_debug "OS details: $(uname -a)"FLASK_PID)"
+    else
+        echo -e "${BOLD}Flask Status:${NC} Not running (manual start required)"
     fi
-    
-    update_progress
-    
     echo
+    echo -e "${BOLD}${GREEN}==================================${NC}"
+    echo
+    print_message "AI Development Orchestration System setup complete!"
+    if [ ! -z "$FLASK_PID" ]; then
+        print_message "System is now running!"
+    else
+        print_message "Setup complete, but Flask is not running. Start it manually after fixing any issues."
+    fi
+
+    # Display success message if server is running
     if [ ! -z "$FLASK_PID" ] && ps -p $FLASK_PID > /dev/null; then
+        echo
         echo -e "${BOLD}${GREEN}====== SUCCESS! ======${NC}"
         echo -e "The AI Development Orchestration System is now running!"
         echo -e "${BOLD}Access the web interface at:${NC} http://$LOCAL_IP:9000"
         echo -e "${BOLD}Log File:${NC} $(pwd)/$LOG_FILE"
         echo -e "${BOLD}Process ID:${NC} $FLASK_PID (use 'kill $FLASK_PID' to stop)"
-        echo -e "${BOLD}To stop the server:${NC} kill $(cat logs/flask.pid 2>/dev/null || echo $FLASK_PID)"
-        echo
-        echo -e "${BOLD}${GREEN}=======================${NC}"
-        echo
-        print_message "Success! It finished and is ready to access at http://$LOCAL_IP:9000"
-    else
-        echo -e "${BOLD}${RED}====== SETUP INCOMPLETE ======${NC}"
-        echo -e "The system setup completed but the Flask application is not running."
-        echo -e "${BOLD}Please check the logs for errors:${NC} $(pwd)/$LOG_FILE"
-        echo
-        echo -e "${BOLD}${RED}==============================${NC}"
-        echo
-        print_error "Setup failed to start the web application. Please check the logs for errors."
-    fi
-}
+        echo -e "${BOLD}To stop the server:${NC} kill $(cat logs/flask.pid 2>/dev/null || echo $
