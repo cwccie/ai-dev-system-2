@@ -716,6 +716,12 @@ start_flask() {
         echo -e "${BOLD}${GREEN}=======================${NC}"
         echo
         print_message "Success! It finished and is ready to access at http://$LOCAL_IP:9000"
+    else
+        echo -e "${BOLD}Flask Status:${NC} Not running (manual start required)"
+        echo
+        echo -e "${BOLD}${GREEN}==================================${NC}"
+        echo
+        print_message "Setup complete, but Flask is not running. Start it manually after fixing any issues."
     fi
 }
 
@@ -820,26 +826,4 @@ fi
 
 # Debug information
 print_debug "Bash version: $BASH_VERSION"
-print_debug "OS details: $(uname -a)"FLASK_PID)"
-    else
-        echo -e "${BOLD}Flask Status:${NC} Not running (manual start required)"
-    fi
-    echo
-    echo -e "${BOLD}${GREEN}==================================${NC}"
-    echo
-    print_message "AI Development Orchestration System setup complete!"
-    if [ ! -z "$FLASK_PID" ]; then
-        print_message "System is now running!"
-    else
-        print_message "Setup complete, but Flask is not running. Start it manually after fixing any issues."
-    fi
-
-    # Display success message if server is running
-    if [ ! -z "$FLASK_PID" ] && ps -p $FLASK_PID > /dev/null; then
-        echo
-        echo -e "${BOLD}${GREEN}====== SUCCESS! ======${NC}"
-        echo -e "The AI Development Orchestration System is now running!"
-        echo -e "${BOLD}Access the web interface at:${NC} http://$LOCAL_IP:9000"
-        echo -e "${BOLD}Log File:${NC} $(pwd)/$LOG_FILE"
-        echo -e "${BOLD}Process ID:${NC} $FLASK_PID (use 'kill $FLASK_PID' to stop)"
-        echo -e "${BOLD}To stop the server:${NC} kill $(cat logs/flask.pid 2>/dev/null || echo $
+print_debug "OS details: $(uname -a)"
