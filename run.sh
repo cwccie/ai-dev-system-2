@@ -4,10 +4,20 @@
 # Runner script to set up environment, install dependencies, and run Flask application
 # (Ollama / WebUI references removed)
 
-set -e  # Exit if a command fails
+# Set +e to continue even if commands fail
+set +e
 
 # Create a unique temporary directory for logs and intermediate files
 TEMP_DIR=$(mktemp -d -t ai-dev-setup-XXXXXXXXXX)
+
+# Colors for console output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
 
 # Cleanup function
 cleanup() {
@@ -34,15 +44,6 @@ cleanup() {
 
 trap cleanup EXIT
 trap 'exit 130' INT  # Handle Ctrl+C gracefully
-
-# Colors for console output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
 
 # Number of setup steps for the progress bar
 TOTAL_STEPS=10
@@ -152,6 +153,14 @@ check_project_directory() {
         print_error "This script must be run from the project root directory."
         print_status "Please cd to the directory containing run.sh and try again."
         exit 1
+    fi
+    
+    # Check if we have write permissions for current directory
+    if ! touch .write-test 2>/dev/null; then
+        print_warning "You don't have write permissions in this directory."
+        print_status "Some operations may fail. Consider running with proper permissions."
+    else
+        rm -f .write-test
     fi
     
     local expected_dirs=("orchestrator" "script-agent" "model_providers" "templates" "static")
@@ -367,11 +376,20 @@ install_dependencies() {
     fi
     
     print_message "Installing additional dependencies..."
-    if pip3 install flask-cors gunicorn flask-wtf > /tmp/add-deps-install.log 2>&1; then
+    if pip3 install flask-cors flask-wtf werkzeug > /tmp/add-deps-install.log 2>&1; then
         print_success "Additional dependencies installed"
     else
         print_warning "Failed to install additional dependencies"
         cat /tmp/add-deps-install.log
+    fi
+    
+    # Install gunicorn in virtual environment
+    print_message "Installing gunicorn in virtual environment..."
+    if pip3 install gunicorn > /tmp/gunicorn-install.log 2>&1; then
+        print_success "Gunicorn installed"
+    else
+        print_warning "Failed to install Gunicorn, will fall back to Flask development server"
+        cat /tmp/gunicorn-install.log
     fi
     
     if [ -f "orchestrator/requirements.txt" ]; then
@@ -406,14 +424,12 @@ check_api_keys() {
     if [ ! -f ".env" ]; then
         print_status "Creating .env file..."
         touch .env
-        chmod 600 .env
+        chmod 600 .env 2>/dev/null || print_warning "Could not set permissions on .env file"
         print_status "Set secure permissions on .env file"
     else
         print_status "Found existing .env file"
-        if [ "$(stat -c %a .env)" != "600" ]; then
-            chmod 600 .env
-            print_status "Updated .env file permissions to be secure"
-        fi
+        chmod 600 .env 2>/dev/null || print_warning "Could not update permissions on .env file"
+        print_status "Updated .env file permissions to be secure"
     fi
     
     if [ -f ".env" ]; then
@@ -475,45 +491,60 @@ check_api_keys() {
         print_success "DeepSeek API key detected"
     fi
     
+    # Set FLASK_SECRET_KEY if not present
+    if [ -z "$FLASK_SECRET_KEY" ]; then
+        print_status "Generating Flask secret key..."
+        RANDOM_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+        echo "FLASK_SECRET_KEY=$RANDOM_KEY" >> .env
+        export FLASK_SECRET_KEY="$RANDOM_KEY"
+        print_success "Flask secret key generated and saved to .env file"
+    fi
+    
     update_progress
 }
 
 create_directories() {
     print_status "Creating directory structure..."
-    mkdir -p orchestrator/config
+    
+    # Create directories safely, ignoring errors if they already exist
+    mkdir -p orchestrator/config 2>/dev/null || print_warning "Could not create orchestrator/config/"
     print_status "Created orchestrator/config/"
     
-    mkdir -p script-agent
+    mkdir -p script-agent 2>/dev/null || print_warning "Could not create script-agent/"
     print_status "Created script-agent/"
     
-    mkdir -p model_providers
+    mkdir -p model_providers 2>/dev/null || print_warning "Could not create model_providers/"
     print_status "Created model_providers/"
     
-    mkdir -p templates
+    mkdir -p templates 2>/dev/null || print_warning "Could not create templates/"
     print_status "Created templates/"
     
-    mkdir -p static/css
+    mkdir -p static/css 2>/dev/null || print_warning "Could not create static/css/"
     print_status "Created static/css/"
     
-    mkdir -p static/js
+    mkdir -p static/js 2>/dev/null || print_warning "Could not create static/js/"
     print_status "Created static/js/"
     
-    mkdir -p logs
+    mkdir -p logs 2>/dev/null || print_warning "Could not create logs/"
     print_status "Created logs/"
     
     print_status "Setting executable permissions on scripts..."
-    chmod +x run.sh
-    print_status "Made run.sh executable"
+    
+    # Don't fail if chmod fails
+    if [ -f "./run.sh" ]; then
+        chmod +x run.sh 2>/dev/null || print_warning "Could not make run.sh executable"
+        print_status "Made run.sh executable"
+    fi
     
     if [ -f "orchestrator/run_orchestrator.sh" ]; then
-        chmod +x orchestrator/run_orchestrator.sh
+        chmod +x orchestrator/run_orchestrator.sh 2>/dev/null || print_warning "Could not make orchestrator/run_orchestrator.sh executable"
         print_status "Made orchestrator/run_orchestrator.sh executable"
     else
         print_warning "orchestrator/run_orchestrator.sh not found, skipping"
     fi
     
     if [ -f "script-agent/run_agent.sh" ]; then
-        chmod +x script-agent/run_agent.sh
+        chmod +x script-agent/run_agent.sh 2>/dev/null || print_warning "Could not make script-agent/run_agent.sh executable"
         print_status "Made script-agent/run_agent.sh executable"
     else
         print_warning "script-agent/run_agent.sh not found, skipping"
@@ -552,7 +583,7 @@ verify_config() {
 
 start_flask() {
     print_status "Preparing to start Flask application..."
-    mkdir -p logs
+    mkdir -p logs 2>/dev/null || print_warning "Could not create logs directory"
     
     if [ -z "$VIRTUAL_ENV" ]; then
         print_status "Activating virtual environment..."
@@ -560,7 +591,8 @@ start_flask() {
     fi
     
     export FLASK_APP=app.py
-    print_status "Set FLASK_APP=app.py"
+    export FLASK_DEBUG=1  # Enable debug mode for development
+    print_status "Set FLASK_APP=app.py and FLASK_DEBUG=1"
     
     local LOG_FILE="logs/flask_$(date +%Y%m%d_%H%M%S).log"
     print_status "Logs will be written to: $LOG_FILE"
@@ -577,7 +609,7 @@ start_flask() {
                 sleep 2
             else
                 print_error "Port 9000 is already in use. Please stop the existing process or use a different port."
-                exit 1
+                return 1
             fi
         fi
     elif command_exists netstat; then
@@ -586,40 +618,83 @@ start_flask() {
             read -p "Do you want to continue anyway? (y/n): " continue_anyway
             if [[ "$continue_anyway" != "y" && "$continue_anyway" != "Y" ]]; then
                 print_error "Aborted by user"
-                exit 1
+                return 1
             fi
         fi
     fi
     
+    # Test if app can be imported before starting
+    print_status "Testing Flask application configuration..."
+    if ! python3 -c "import app" > /tmp/app-import-test.log 2>&1; then
+        print_error "Failed to import app.py - check the application code"
+        cat /tmp/app-import-test.log
+        print_status "You can try running 'python3 -c \"import app\"' to see the error"
+        print_warning "Continuing setup but skipping Flask startup"
+        update_progress
+        return 1
+    fi
+    
+    # Try a simpler approach first - just run python directly
+    print_message "Starting Flask application in test mode..."
+    python3 -c "from app import app; print('Flask app found and configured correctly')" > /tmp/app-test.log 2>&1
+    if [ $? -ne 0 ]; then
+        print_error "Flask application configuration test failed"
+        cat /tmp/app-test.log
+        print_status "Skipping Flask startup, please fix app.py and try again"
+        print_warning "Continuing setup but skipping Flask startup"
+        update_progress
+        return 1
+    else
+        print_success "Flask application configuration test passed"
+    fi
+    
     print_message "Starting Flask application on http://0.0.0.0:9000"
-    if command_exists gunicorn; then
+    
+    # First try with gunicorn if available
+    if command_exists gunicorn || pip3 list | grep -q gunicorn; then
         print_status "Using gunicorn for a production-ready server..."
-        nohup gunicorn -b 0.0.0.0:9000 -w 4 --access-logfile logs/access.log --error-logfile logs/error.log app:app > "$LOG_FILE" 2>&1 &
+        gunicorn -b 0.0.0.0:9000 -w 2 --access-logfile logs/access.log --error-logfile logs/error.log app:app > "$LOG_FILE" 2>&1 &
         FLASK_PID=$!
     else
         print_status "Using Flask development server (consider installing gunicorn for production)..."
-        nohup flask run --host=0.0.0.0 --port=9000 > "$LOG_FILE" 2>&1 &
+        python3 -m flask run --host=0.0.0.0 --port=9000 > "$LOG_FILE" 2>&1 &
         FLASK_PID=$!
     fi
     
     print_status "Waiting for server to start..."
-    sleep 3
+    sleep 5  # Give more time for the server to start
     
     if ps -p $FLASK_PID > /dev/null; then
         print_success "Application started in background with PID: $FLASK_PID"
         
+        # Save PID to a file for easier management
+        echo $FLASK_PID > logs/flask.pid 2>/dev/null || print_warning "Could not save PID to logs/flask.pid"
+        print_status "PID saved to logs/flask.pid"
+        
         if command_exists curl; then
-            if curl -s --head --fail http://localhost:9000 > /dev/null; then
-                print_success "Server is responding to requests"
-            else
-                print_warning "Server is running but not responding yet. It may need more time to initialize."
+            # Retry a few times as server might take time to start
+            for i in {1..3}; do
+                if curl -s --head --fail http://localhost:9000 > /dev/null; then
+                    print_success "Server is responding to requests"
+                    break
+                else
+                    print_status "Waiting for server to respond (attempt $i/3)..."
+                    sleep 3
+                fi
+            done
+            
+            if ! curl -s --head --fail http://localhost:9000 > /dev/null; then
+                print_warning "Server started but is not responding to requests yet."
+                print_status "Check the logs for more information: $LOG_FILE"
+                tail -n 20 "$LOG_FILE" 2>/dev/null || print_warning "Could not read log file"
             fi
         fi
     else
         print_error "Flask application failed to start"
         print_status "Check the log at $LOG_FILE for details"
-        cat "$LOG_FILE"
-        exit 1
+        cat "$LOG_FILE" 2>/dev/null || print_warning "Could not read log file"
+        print_warning "Continuing setup but Flask is not running"
+        return 1
     fi
     
     local LOCAL_IP
@@ -634,11 +709,21 @@ start_flask() {
     echo -e "${BOLD}${GREEN}====== Application Summary ======${NC}"
     echo -e "${BOLD}Flask Web Interface:${NC} http://$LOCAL_IP:9000"
     echo -e "${BOLD}Log File:${NC} $(pwd)/$LOG_FILE"
-    echo -e "${BOLD}Process ID:${NC} $FLASK_PID (use 'kill $FLASK_PID' to stop)"
+    if [ ! -z "$FLASK_PID" ]; then
+        echo -e "${BOLD}Process ID:${NC} $FLASK_PID (use 'kill $FLASK_PID' to stop)"
+        echo -e "${BOLD}To stop the server:${NC} kill $(cat logs/flask.pid 2>/dev/null || echo $FLASK_PID)"
+    else
+        echo -e "${BOLD}Flask Status:${NC} Not running (manual start required)"
+    fi
     echo
     echo -e "${BOLD}${GREEN}==================================${NC}"
     echo
-    print_message "AI Development Orchestration System is now running!"
+    print_message "AI Development Orchestration System setup complete!"
+    if [ ! -z "$FLASK_PID" ]; then
+        print_message "System is now running!"
+    else
+        print_message "Setup complete, but Flask is not running. Start it manually after fixing any issues."
+    fi
 }
 
 main() {
@@ -686,8 +771,6 @@ main() {
 # Debug mode checks
 if [ "$DEBUG" = "true" ]; then
     print_warning "Debug mode enabled"
-    print_debug "Bash version: $BASH_VERSION"
-    print_debug "OS details: $(uname -a)"
     print_debug "Current working directory: $(pwd)"
     set -x
 fi
@@ -741,3 +824,7 @@ else
     print_warning "This script is meant to be executed, not sourced."
     print_message "Run it with: ./run.sh [OPTIONS]"
 fi
+
+# Debug information (moved outside the if-else block)
+print_debug "Bash version: $BASH_VERSION"
+print_debug "OS details: $(uname -a)"

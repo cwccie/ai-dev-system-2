@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import logging
+import asyncio
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -42,6 +43,7 @@ try:
     from script_agent.claude_script_agent import ScriptAgent
     from script_agent.component_generator import ComponentGenerator
     from model_providers import get_provider
+    from model_providers.server_manager import get_server_manager
 except ImportError as e:
     logger.error(f"Import error: {e}. Some components may not be available.")
 
@@ -93,6 +95,17 @@ MODEL_PROVIDERS = {
 cost_estimator = None
 model_recommender = None
 agent_pool = None
+
+# Helper function to run async functions in a synchronous context
+def run_async(coro):
+    """Runs an async function in a synchronous context using the current event loop or a new one."""
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    return loop.run_until_complete(coro)
 
 # Initialize shared components
 def init_shared_components():
@@ -266,6 +279,16 @@ def save_api_key():
     
     return jsonify({'success': True, 'message': f'{MODEL_PROVIDERS[provider]} API key saved successfully'})
 
+# Async version of generate_script
+async def async_generate_script(agent, name, description, requirements, iterations):
+    """Async wrapper for generate_script"""
+    return await agent.generate_script(
+        name=name,
+        description=description,
+        requirements=requirements,
+        iterations=iterations
+    )
+
 @app.route('/run_script_agent', methods=['POST'])
 @login_required
 def run_script_agent():
@@ -305,13 +328,14 @@ def run_script_agent():
         # Initialize script agent
         agent = ScriptAgent(provider=provider)
         
-        # Generate script
-        script = await agent.generate_script(
+        # Generate script - using the synchronous wrapper for the async call
+        script = run_async(async_generate_script(
+            agent=agent,
             name=script_name,
             description=script_description,
             requirements=request.form.getlist('requirements[]'),
             iterations=int(request.form.get('iterations', 1))
-        )
+        ))
         
         # Estimate cost if available
         cost_info = {}
@@ -621,6 +645,51 @@ def server_error(error):
     logger.error(f"Server error: {error}")
     return render_template('500.html'), 500
 
+# Async helper for get_available_models
+async def async_get_available_models():
+    """Async wrapper for get_available_models"""
+    from model_providers import get_available_models
+    return await get_available_models()
+
+@app.route('/api/local_models/models/<role>', methods=['GET'])
+@login_required
+def get_models_by_role(role):
+    """Get models for a specific role (coding or orchestration)"""
+    try:
+        # Check if role is valid
+        if role not in ['coding', 'orchestration', 'all']:
+            return jsonify({
+                'success': False,
+                'error': f'Invalid role: {role}'
+            })
+        
+        # Get models using the synchronous wrapper for the async call
+        all_models = run_async(async_get_available_models())
+        
+        # Get ollama models
+        local_models = all_models.get('ollama', [])
+        
+        if role == 'all':
+            # Return all models
+            models = local_models
+        else:
+            # Filter by role
+            models = [model for model in local_models if model.get('role') == role]
+            
+            # Sort by rank
+            models.sort(key=lambda m: m.get('rank', 999))
+        
+        return jsonify({
+            'success': True,
+            'models': models
+        })
+    except Exception as e:
+        logger.error(f"Error getting {role} models: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
 """
 API Routes for Local Models Management
 These routes need to be added to the app.py file
@@ -756,48 +825,6 @@ def remove_server(server_id):
             })
     except Exception as e:
         logger.error(f"Error removing server: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
-
-@app.route('/api/local_models/models/<role>', methods=['GET'])
-@login_required
-def get_models_by_role(role):
-    """Get models for a specific role (coding or orchestration)"""
-    try:
-        # Check if role is valid
-        if role not in ['coding', 'orchestration', 'all']:
-            return jsonify({
-                'success': False,
-                'error': f'Invalid role: {role}'
-            })
-        
-        # Initialize components
-        from model_providers import get_available_models
-        
-        # Get models
-        all_models = await get_available_models()
-        
-        # Get ollama models
-        local_models = all_models.get('ollama', [])
-        
-        if role == 'all':
-            # Return all models
-            models = local_models
-        else:
-            # Filter by role
-            models = [model for model in local_models if model.get('role') == role]
-            
-            # Sort by rank
-            models.sort(key=lambda m: m.get('rank', 999))
-        
-        return jsonify({
-            'success': True,
-            'models': models
-        })
-    except Exception as e:
-        logger.error(f"Error getting {role} models: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
