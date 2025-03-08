@@ -43,7 +43,6 @@ try:
     from script_agent.claude_script_agent import ScriptAgent
     from script_agent.component_generator import ComponentGenerator
     from model_providers import get_provider
-    from model_providers.server_manager import get_server_manager
 except ImportError as e:
     logger.error(f"Import error: {e}. Some components may not be available.")
 
@@ -707,6 +706,7 @@ def get_servers():
     """Get all configured servers"""
     try:
         # Initialize server manager if not already done
+        from model_providers.server_manager import get_server_manager
         server_manager = get_server_manager()
         
         # Get all servers
@@ -737,6 +737,7 @@ def add_server(server_id):
             })
         
         # Initialize server manager
+        from model_providers.server_manager import get_server_manager
         server_manager = get_server_manager()
         
         # Add server
@@ -773,6 +774,7 @@ def update_server(server_id):
             })
         
         # Initialize server manager
+        from model_providers.server_manager import get_server_manager
         server_manager = get_server_manager()
         
         # Check if server exists
@@ -808,6 +810,7 @@ def remove_server(server_id):
     """Remove a server"""
     try:
         # Initialize server manager
+        from model_providers.server_manager import get_server_manager
         server_manager = get_server_manager()
         
         # Remove server

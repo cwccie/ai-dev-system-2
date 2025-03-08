@@ -828,3 +828,40 @@ fi
 # Debug information (moved outside the if-else block)
 print_debug "Bash version: $BASH_VERSION"
 print_debug "OS details: $(uname -a)"
+
+
+
+
+
+
+
+    local LOCAL_IP
+    LOCAL_IP=$(hostname -I | awk '{print $1}')
+    if [ -z "$LOCAL_IP" ]; then
+        LOCAL_IP="localhost"
+    fi
+    
+    update_progress
+    
+    echo
+    if [ ! -z "$FLASK_PID" ] && ps -p $FLASK_PID > /dev/null; then
+        echo -e "${BOLD}${GREEN}====== SUCCESS! ======${NC}"
+        echo -e "The AI Development Orchestration System is now running!"
+        echo -e "${BOLD}Access the web interface at:${NC} http://$LOCAL_IP:9000"
+        echo -e "${BOLD}Log File:${NC} $(pwd)/$LOG_FILE"
+        echo -e "${BOLD}Process ID:${NC} $FLASK_PID (use 'kill $FLASK_PID' to stop)"
+        echo -e "${BOLD}To stop the server:${NC} kill $(cat logs/flask.pid 2>/dev/null || echo $FLASK_PID)"
+        echo
+        echo -e "${BOLD}${GREEN}=======================${NC}"
+        echo
+        print_message "Success! It finished and is ready to access at http://$LOCAL_IP:9000"
+    else
+        echo -e "${BOLD}${RED}====== SETUP INCOMPLETE ======${NC}"
+        echo -e "The system setup completed but the Flask application is not running."
+        echo -e "${BOLD}Please check the logs for errors:${NC} $(pwd)/$LOG_FILE"
+        echo
+        echo -e "${BOLD}${RED}==============================${NC}"
+        echo
+        print_error "Setup failed to start the web application. Please check the logs for errors."
+    fi
+}
