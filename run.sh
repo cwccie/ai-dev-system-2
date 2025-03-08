@@ -27,7 +27,8 @@ cleanup() {
         echo -e "Check the log files in ${TEMP_DIR} for details."
     fi
     
-    if [ ! -z "$FLASK_PID" ] && ps -p $FLASK_PID > /dev/null; then
+    # Only stop Flask if KEEP_SERVER_RUNNING is not set to "true"
+    if [ "$KEEP_SERVER_RUNNING" != "true" ] && [ ! -z "$FLASK_PID" ] && ps -p $FLASK_PID > /dev/null; then
         echo -e "${YELLOW}Stopping Flask server (PID: $FLASK_PID)${NC}"
         kill $FLASK_PID 2>/dev/null || true
     fi
